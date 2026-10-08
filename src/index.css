@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --color-done: #2f9e5b;
+  --color-queued: #d9a019;
+  --color-failed: #d64545;
+  --color-pending: #c3c9d2;
+  --color-notext: #e3e7ec;
+  --color-brand: #3b6fd8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-done: #44b872;
+    --color-queued: #e6b33a;
+    --color-failed: #ec6262;
+    --color-pending: #3d434d;
+    --color-notext: #2a2e35;
+    --color-brand: #6d97ee;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+}
+
+@keyframes blink-uploading {
+  0%, 100% { background-color: color-mix(in srgb, var(--color-brand) 6%, transparent); }
+  50% { background-color: color-mix(in srgb, var(--color-brand) 24%, transparent); }
+}
+
+@keyframes blink-extracting {
+  0%, 100% { background-color: color-mix(in srgb, var(--color-queued) 8%, transparent); }
+  50% { background-color: color-mix(in srgb, var(--color-queued) 30%, transparent); }
+}
+
+@layer components {
+  .row-uploading {
+    animation: blink-uploading 1.1s ease-in-out infinite;
+  }
+  .row-extracting {
+    animation: blink-extracting 1.1s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row-uploading {
+      animation: none;
+      background-color: color-mix(in srgb, var(--color-brand) 15%, transparent);
+    }
+    .row-extracting {
+      animation: none;
+      background-color: color-mix(in srgb, var(--color-queued) 20%, transparent);
+    }
+  }
+}
