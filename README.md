@@ -103,9 +103,13 @@ O Railway monta a imagem pelo `Dockerfile`: o build com Node 24 e, na imagem fin
 **Configuração única no Railway** (no mesmo projeto da API)
 
 1. Crie um serviço vazio para o frontend. Não conecte o repositório: quem publica é o GitHub Actions.
-2. Em **Variables**, defina `API_URL` com o endereço da API na rede privada, por exemplo `http://${{manhwa-api.RAILWAY_PRIVATE_DOMAIN}}:3000`, trocando `manhwa-api` pelo nome do serviço da API. `PORT` é definida pelo Railway.
+2. Em **Variables**, defina `API_PROXY` com o endereço da API (é a mesma variável do `npm run dev`). Pode ser de dois jeitos:
+   - **Endereço público:** `https://manhaw-translate-api-production.up.railway.app`.
+   - **Rede privada** (mais rápida, não passa pela internet): `http://${{NOME-DA-API.RAILWAY_PRIVATE_DOMAIN}}:3000`, trocando pelo nome do serviço da API e com `PORT=3000` definido na API.
+
+   `PORT` do frontend é definida pelo Railway.
 3. Em **Settings → Networking**, gere o domínio público, ou ligue o seu. Esse é o endereço que as pessoas acessam, e ele vai em `APP_URL` na API.
-4. A API não precisa de domínio público: o frontend fala com ela pela rede privada.
+4. Usando a rede privada, a API nem precisa de domínio público.
 
 **Configuração única no GitHub** (Settings → Environments → `production`)
 
@@ -117,7 +121,7 @@ O Railway monta a imagem pelo `Dockerfile`: o build com Node 24 e, na imagem fin
 
 ```bash
 docker build -t manhwa-frontend .
-docker run -p 8088:8080 -e API_URL=http://host.docker.internal:3000 manhwa-frontend
+docker run -p 8088:8080 -e API_PROXY=http://host.docker.internal:3000 manhwa-frontend
 ```
 
 Abra `http://localhost:8088`. Para isso a API precisa ouvir em todos os endereços (`HOST=::` no `.env` do backend).
