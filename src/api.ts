@@ -161,6 +161,8 @@ export class ApiError extends Error {
   }
 }
 
+const OFFLINE_MESSAGE = 'Não foi possível conectar ao servidor. Tente novamente em instantes.'
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
@@ -169,7 +171,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: init?.body ? { 'content-type': 'application/json' } : undefined,
     })
   } catch {
-    throw new ApiError(0, 'Backend fora do ar: rode "npm run api" no projeto manhaw-translate.')
+    throw new ApiError(0, OFFLINE_MESSAGE)
   }
   const text = await res.text()
   let body: { message?: string | string[]; code?: string } | null
@@ -184,7 +186,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(
       res.status,
       res.status >= 502 && res.status <= 504
-        ? 'Backend fora do ar: rode "npm run api" no projeto manhaw-translate.'
+        ? OFFLINE_MESSAGE
         : (message ?? `Erro ${res.status}`),
       body?.code,
     )
