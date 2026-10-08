@@ -180,7 +180,7 @@ export const adminApi = {
 }
 
 export interface StorageInfo {
-  active: { kind: 'local' | 'azure' | 's3'; root?: string; container?: string; connectionString?: string | null; region?: string; bucket?: string; accessKeyId?: string | null }
+  active: { kind: 'local' | 'azure' | 's3'; root?: string; container?: string; connectionString?: string | null; region?: string; bucket?: string; endpoint?: string | null; accessKeyId?: string | null }
   source: 'tela' | '.env'
   stats: { files: number; bytes: number }
   migration: { status: 'running' | 'done' | 'failed'; to: string; total: number; done: number; failed?: number } | null
@@ -195,6 +195,7 @@ export interface StorageInput {
   bucket?: string
   accessKeyId?: string
   secretAccessKey?: string
+  endpoint?: string
 }
 
 export const storageApi = {

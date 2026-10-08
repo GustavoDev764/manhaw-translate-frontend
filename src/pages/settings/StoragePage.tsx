@@ -7,7 +7,7 @@ import { num } from '../../lib/format'
 import { usePolling } from '../../lib/hooks'
 import { SettingsLayout } from './SettingsLayout'
 
-const LABEL = { local: 'Local', azure: 'Azure Blob Storage', s3: 'AWS S3' } as const
+const LABEL = { local: 'Local', azure: 'Azure Blob Storage', s3: 'S3' } as const
 const gb = (b: number) => `${(b / 1024 ** 3).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} GB`
 
 export function StoragePage() {
@@ -81,7 +81,7 @@ export function StoragePage() {
             className={`rounded-xl border-2 p-3 text-left ${form.kind === k ? 'border-brand' : 'border-slate-200 dark:border-slate-800'}`}
           >
             <b>{LABEL[k]}</b>
-            <div className="text-xs text-slate-500">{k === 'local' ? 'Pasta no servidor' : k === 'azure' ? 'Container na sua conta Azure' : 'Bucket na sua conta AWS'}</div>
+            <div className="text-xs text-slate-500">{k === 'local' ? 'Pasta no servidor' : k === 'azure' ? 'Container na sua conta Azure' : 'Bucket na AWS ou compatível (Railway, R2, MinIO)'}</div>
             {d?.active.kind === k && <Badge tone="done">ativo</Badge>}
           </button>
         ))}
@@ -100,8 +100,13 @@ export function StoragePage() {
         )}
         {form.kind === 's3' && (
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Região"><input className={inputClass} value={form.region ?? ''} onChange={(e) => set({ region: e.target.value })} placeholder="us-east-1" /></Field>
+            <Field label="Região"><input className={inputClass} value={form.region ?? ''} onChange={(e) => set({ region: e.target.value })} placeholder="us-east-1 ou auto" /></Field>
             <Field label="Bucket"><input className={inputClass} value={form.bucket ?? ''} onChange={(e) => set({ bucket: e.target.value })} /></Field>
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="s3-ep" className="text-sm font-medium">Endpoint {d?.active.endpoint && <span className="text-xs text-slate-500">(salvo: {d.active.endpoint}; deixe em branco para manter)</span>}</label>
+              <input id="s3-ep" className={inputClass} value={form.endpoint ?? ''} onChange={(e) => set({ endpoint: e.target.value })} placeholder="https://t3.storageapi.dev" />
+              <p className="text-xs text-slate-500">Deixe em branco na AWS. Preencha nos serviços compatíveis com S3, como Railway, Cloudflare R2 e MinIO; nesses a região costuma ser auto.</p>
+            </div>
             <div className="space-y-1"><label htmlFor="s3-ak" className="text-sm font-medium">Access key</label><PasswordField id="s3-ak" value={form.accessKeyId ?? ''} onChange={(v) => set({ accessKeyId: v })} /></div>
             <div className="space-y-1"><label htmlFor="s3-sk" className="text-sm font-medium">Secret key</label><PasswordField id="s3-sk" value={form.secretAccessKey ?? ''} onChange={(v) => set({ secretAccessKey: v })} /></div>
           </div>
