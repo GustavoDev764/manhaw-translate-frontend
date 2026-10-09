@@ -7,7 +7,7 @@ import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../components/ui'
 import { cx } from '../lib/cx'
 import { ago, when } from '../lib/format'
-import { href, usePolling } from '../lib/hooks'
+import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
 import { CHANGE_LABEL, loadFont, reviewApi, type CommentAction, type FontRow, type Rect, type ReviewComment, type ReviewPage as Page, type TextLayer } from '../reviewApi'
 import { LayerCanvas, TextPanel } from './review/TextEditing'
@@ -126,8 +126,8 @@ export function ReviewPage({ pageId }: { pageId: string }) {
         draftUndo()
         return
       }
-      if (e.key === 'ArrowLeft' && page.prevId) window.location.hash = href('r', page.prevId)
-      if (e.key === 'ArrowRight' && page.nextId) window.location.hash = href('r', page.nextId)
+      if (e.key === 'ArrowLeft' && page.prevId) navigate(href('r', page.prevId))
+      if (e.key === 'ArrowRight' && page.nextId) navigate(href('r', page.nextId))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

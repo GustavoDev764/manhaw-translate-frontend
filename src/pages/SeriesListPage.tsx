@@ -3,7 +3,7 @@ import { api } from '../api'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, EmptyState, inputClass, Notice, Spinner, StatusBar } from '../components/ui'
 import { ago, num } from '../lib/format'
-import { href, usePolling } from '../lib/hooks'
+import { href, navigate, usePolling } from '../lib/hooks'
 
 export function SeriesListPage() {
   const { finishedCount, toast } = useJobs()
@@ -18,7 +18,7 @@ export function SeriesListPage() {
       const s = await api.addSeries(url)
       setUrl('')
       await reload()
-      window.location.hash = href('series', s.slug, 'download')
+      navigate(href('series', s.slug, 'download'))
     } catch (err) {
       toast('failed', err instanceof Error ? err.message : String(err))
     } finally {

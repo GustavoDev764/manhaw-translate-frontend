@@ -4,12 +4,12 @@ import { useJobs } from '../../components/jobsContext'
 import { ModelConfigPicker } from '../../components/ModelConfigPicker'
 import { PasswordField } from '../../components/password'
 import { Button, Card, EmptyState, Field, inputClass, Notice, Spinner } from '../../components/ui'
-import { href, usePolling } from '../../lib/hooks'
+import { href, navigate, usePolling } from '../../lib/hooks'
 import { keysApi, type AdminKey, type ModelConfig } from '../../keysApi'
 import { SettingsLayout } from './SettingsLayout'
 
 const backToList = () => {
-  window.location.hash = href('settings', 'api-keys')
+  navigate(href('settings', 'api-keys'))
 }
 
 export function AdminKeyFormPage({ keyId }: { keyId: string }) {

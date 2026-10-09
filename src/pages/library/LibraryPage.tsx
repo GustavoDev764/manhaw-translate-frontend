@@ -5,7 +5,7 @@ import { useJobs } from '../../components/jobsContext'
 import { ScanSelect } from '../../components/ScanSelect'
 import { Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, StatusBar } from '../../components/ui'
 import { num } from '../../lib/format'
-import { href, usePolling } from '../../lib/hooks'
+import { href, navigate, usePolling } from '../../lib/hooks'
 import { libraryApi } from '../../workflowsApi'
 
 export function LibraryPage() {
@@ -99,7 +99,7 @@ export function LibraryPage() {
         onCreated={async (slug) => {
           setCreating(false)
           await reload()
-          window.location.hash = href('s', slug)
+          navigate(href('s', slug))
         }}
       />
     </div>

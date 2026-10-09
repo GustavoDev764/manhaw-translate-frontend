@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { href, usePolling } from '../lib/hooks'
 import { num, when } from '../lib/format'
 import { useWorkflowEvents } from '../lib/workflowEvents'
@@ -22,14 +23,14 @@ function expiresIn(iso: string): string {
   return `expira em ${Math.floor(minutes / 60)} h ${minutes % 60} min`
 }
 
-export function DownloadsDrawer() {
+export function DownloadsDrawer({ seriesId }: { seriesId: string }) {
   const { toast } = useJobs()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [ask, confirmDialog] = useConfirm()
   const list = usePolling(exportsApi.list, 0, [])
   const reload = list.reload
-  const items = list.data ?? []
+  const items = (list.data ?? []).filter((e) => e.series?.id === seriesId)
   const ready = items.filter((e) => e.status === 'ready').length
   const generating = items.filter((e) => e.status === 'pending').length
 
@@ -72,19 +73,20 @@ export function DownloadsDrawer() {
   return (
     <>
       {confirmDialog}
-      <button
-        type="button"
+      <Button
+        size="sm"
         onClick={() => {
           setOpen(true)
           void list.reload()
         }}
-        className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-        title="Zips gerados para baixar"
+        title="Zips gerados desta obra, prontos para baixar"
       >
         Downloads
-        {generating > 0 && <Spinner className="size-3" />}
-        {ready > 0 && <span className="rounded-full bg-brand/15 px-1.5 text-xs text-brand">{ready}</span>}
-      </button>
+        {generating > 0 && <Spinner className="ml-1.5 size-3" />}
+        {ready > 0 && <span className="ml-1.5 rounded-full bg-brand/15 px-1.5 text-xs text-brand">{ready}</span>}
+      </Button>
+      {createPortal(
+        <>
       {open && (
         <div className="fixed inset-0 z-40 bg-slate-950/40" onClick={() => setOpen(false)} aria-hidden />
       )}
@@ -109,7 +111,7 @@ export function DownloadsDrawer() {
             </div>
           )}
           {list.error && <p className="text-sm text-failed">{list.error}</p>}
-          {list.data !== null && !items.length && <EmptyState>Nenhum zip. Na página de um manhwa, selecione capítulos e use “Baixar .zip”.</EmptyState>}
+          {list.data !== null && !items.length && <EmptyState>Nenhum zip desta obra. Selecione capítulos e use “Baixar .zip”.</EmptyState>}
           {items.map((e) => (
             <div key={e.id} className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
               <div className="flex items-start justify-between gap-2">
@@ -118,7 +120,7 @@ export function DownloadsDrawer() {
                     {e.fileName}
                   </div>
                   <div className="truncate text-xs text-slate-500">
-                    {e.series?.title ?? 'Série removida'} · {e.chapters === 1 ? 'cap.' : 'caps.'} {e.spec} · {e.kind === 'original' ? 'originais' : 'traduzidas'}
+                    {e.chapters === 1 ? 'cap.' : 'caps.'} {e.spec} · {e.kind === 'original' ? 'originais' : 'traduzidas'}
                   </div>
                 </div>
                 {e.status === 'ready' ? <Badge tone="done">pronto</Badge> : e.status === 'pending' ? <Badge tone="queued">gerando</Badge> : <Badge tone="failed">falhou</Badge>}
@@ -154,6 +156,9 @@ export function DownloadsDrawer() {
           ))}
         </div>
       </aside>
+        </>,
+        document.body,
+      )}
     </>
   )
 }

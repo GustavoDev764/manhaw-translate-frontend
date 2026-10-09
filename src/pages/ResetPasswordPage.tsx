@@ -34,7 +34,7 @@ export function ResetPasswordPage({ token }: { token: string }) {
         {done ? (
           <>
             <Notice tone="neutral">Senha alterada. As outras sessões foram encerradas.</Notice>
-            <a href="#/">
+            <a href="/">
               <Button variant="primary" className="w-full">Entrar</Button>
             </a>
           </>

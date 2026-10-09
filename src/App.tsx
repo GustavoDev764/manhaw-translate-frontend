@@ -1,14 +1,14 @@
+import { useEffect } from 'react'
 import { ROLE_LABEL } from './adminApi'
 import { AuthProvider } from './auth/AuthContext'
 import { useAuth } from './auth/authCtx'
-import { DownloadsDrawer } from './components/DownloadsDrawer'
 import { EventsBridge } from './components/events'
 import { JobsProvider } from './components/jobs'
 import { UploadsProvider } from './components/uploads'
 import { useJobs } from './components/jobsContext'
 import { Badge, Spinner } from './components/ui'
 import { cx } from './lib/cx'
-import { href, useHashRoute } from './lib/hooks'
+import { href, useRoute } from './lib/hooks'
 import { ChapterPagesPage } from './pages/ChapterPagesPage'
 import { JobsPage } from './pages/JobsPage'
 import { ChapterStagesPage } from './pages/library/ChapterStagesPage'
@@ -27,6 +27,7 @@ import { ScanApiKeyPage } from './pages/settings/ScanApiKeyPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { QueuePage } from './pages/QueuePage'
 import { ReaderPage } from './pages/ReaderPage'
+import { MangaReaderPage } from './pages/reader/MangaReaderPage'
 import { SeriesListPage } from './pages/SeriesListPage'
 import { SeriesPage } from './pages/SeriesPage'
 import { AuditPage } from './pages/settings/AuditPage'
@@ -39,6 +40,7 @@ import { StoragePage } from './pages/settings/StoragePage'
 import { TeamsPage } from './pages/settings/TeamsPage'
 import { UsersPage } from './pages/settings/UsersPage'
 import { WorkflowsPage } from './pages/WorkflowsPage'
+import { exportsApi } from './workflowsApi'
 
 function Nav({ section }: { section: string }) {
   const { jobs } = useJobs()
@@ -68,7 +70,6 @@ function Nav({ section }: { section: string }) {
         <nav className="flex flex-wrap gap-1">
           {link(href(), 'Manhwas', section === '' || section === 's' || section === 'series')}
           {link(href('workflows'), 'Workflows', section === 'workflows')}
-          {me && !me.mustChangePassword && <DownloadsDrawer />}
           {me?.role === 'system_admin' && running > 0 && link(
             href('jobs'),
             <>
@@ -119,9 +120,10 @@ const SETTINGS: Record<string, () => React.ReactNode> = {
 
 function Routes() {
   const { me } = useAuth()
-  const route = useHashRoute()
+  const route = useRoute()
   const [section, slug, sub, chapter, focus] = route
   const admin = me?.role === 'system_admin' || me?.role === 'scan_admin'
+  if (section === 'ler' && slug && !me?.mustChangePassword) return <MangaReaderPage key={slug} slug={slug} chapterId={sub} />
   let page: React.ReactNode
   if (me?.mustChangePassword || section === 'profile') page = <ProfilePage />
   else if (section === 'settings' && slug === 'api-keys' && sub && me?.role === 'system_admin') page = <AdminKeyFormPage keyId={sub} />
@@ -156,6 +158,10 @@ function Routes() {
 
 function Gate() {
   const { me, loading } = useAuth()
+  const userId = me?.id
+  useEffect(() => {
+    if (userId) exportsApi.list().catch(() => undefined)
+  }, [userId])
   if (loading) {
     return (
       <div className="grid min-h-screen place-items-center text-sm text-slate-500">
@@ -163,7 +169,8 @@ function Gate() {
       </div>
     )
   }
-  if (!me && window.location.hash.startsWith('#/reset/')) return <ResetPasswordPage token={window.location.hash.slice('#/reset/'.length)} />
+  const resetToken = /^\/reset\/([^/]+)/.exec(window.location.pathname)?.[1] ?? /^#\/reset\/([^/]+)/.exec(window.location.hash)?.[1]
+  if (!me && resetToken) return <ResetPasswordPage token={decodeURIComponent(resetToken)} />
   if (!me) return <LoginPage />
   return (
     <JobsProvider>

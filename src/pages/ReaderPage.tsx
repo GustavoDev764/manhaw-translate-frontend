@@ -4,7 +4,7 @@ import { useJobs } from '../components/jobsContext'
 import { Button, EmptyState, Notice, Spinner } from '../components/ui'
 import { cx } from '../lib/cx'
 import { ago, chapterNo } from '../lib/format'
-import { href, usePolling } from '../lib/hooks'
+import { href, navigate, usePolling } from '../lib/hooks'
 import { byPosition, KIND_ORDER, NOTE_KINDS } from '../lib/notes'
 
 const ANNOTATE_KEY = 'reader.annotate'
@@ -231,7 +231,7 @@ export function ReaderPage({ slug, chapter, focus }: { slug: string; chapter: st
           <a href={chapterLink(-1)} className="text-sm text-slate-500 hover:text-brand dark:text-slate-400">
             ← Capítulo {n - 1}
           </a>
-          <Button variant="primary" onClick={() => (window.location.hash = chapterLink(1))}>
+          <Button variant="primary" onClick={() => navigate(chapterLink(1))}>
             Próximo capítulo ({n + 1}) →
           </Button>
         </div>

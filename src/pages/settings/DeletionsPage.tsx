@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Pagination } from '../../components/Pagination'
 import { Badge, Card, EmptyState, Notice, Spinner, Tabs } from '../../components/ui'
 import { ago, num } from '../../lib/format'
-import { href, usePolling } from '../../lib/hooks'
+import { href, navigate, usePolling } from '../../lib/hooks'
 import { useWorkflowEvents } from '../../lib/workflowEvents'
 import { workflowsApi, type WorkflowRow } from '../../workflowsApi'
 import { WF_STATUS } from '../../lib/workflowStatus'
@@ -84,7 +84,7 @@ export function DeletionsPage({ openId }: { openId?: number }) {
               </thead>
               <tbody>
                 {list.data.rows.map((w) => (
-                  <tr key={w.id} className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40 ${openId === w.id ? 'bg-brand/5' : ''}`} onClick={() => (window.location.hash = href('settings', 'deletions', String(w.id)))}>
+                  <tr key={w.id} className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40 ${openId === w.id ? 'bg-brand/5' : ''}`} onClick={() => navigate(href('settings', 'deletions', String(w.id)))}>
                     <td className="px-4 py-2 font-mono text-xs text-slate-500">
                       <a href={href('settings', 'deletions', String(w.id))}>#{w.id}</a>
                     </td>

@@ -3,7 +3,7 @@ import { api, imageUrl, type LocalChapter, type Note, type NoteKind } from '../.
 import { Button, Card, EmptyState, Notice, Spinner } from '../../components/ui'
 import { cx } from '../../lib/cx'
 import { ago, chapterNo } from '../../lib/format'
-import { href, usePolling } from '../../lib/hooks'
+import { href, navigate, usePolling } from '../../lib/hooks'
 import { byPosition, KIND_ORDER, NOTE_KINDS } from '../../lib/notes'
 
 type Show = 'open' | 'resolved' | 'all'
@@ -100,7 +100,7 @@ export function NotesTab({ slug, chapters }: { slug: string; chapters: LocalChap
             variant="primary"
             size="sm"
             className="ml-auto"
-            onClick={() => (window.location.hash = href('series', slug, 'read', firstRead))}
+            onClick={() => navigate(href('series', slug, 'read', firstRead))}
           >
             Ler o manhwa
           </Button>
@@ -165,7 +165,7 @@ export function NotesTab({ slug, chapters }: { slug: string; chapters: LocalChap
                     {n.comment || <em className="text-slate-400">sem comentário</em>}
                   </p>
                   <div className="flex gap-2 pt-1">
-                    <Button size="sm" onClick={() => (window.location.hash = href('series', slug, 'read', chapter, n.id))}>
+                    <Button size="sm" onClick={() => navigate(href('series', slug, 'read', chapter, n.id))}>
                       Abrir no leitor
                     </Button>
                     <Button size="sm" variant="ghost" disabled={busy === n.id} onClick={() => resolve(n)}>

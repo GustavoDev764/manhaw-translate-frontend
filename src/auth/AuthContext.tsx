@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ApiError } from '../api'
 import { authApi, type FeatureKey, type Me } from '../adminApi'
+import { navigate } from '../lib/hooks'
 import { AuthCtx } from './authCtx'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await authApi.logout()
     } finally {
       setMe(null)
-      window.location.hash = '#/'
+      navigate('/')
     }
   }, [])
 

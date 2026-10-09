@@ -9,8 +9,8 @@ import { GlossaryPanel } from './GlossaryPanel'
 import { DeleteSeriesDialog, RenameSeriesDialog } from './SeriesManageDialogs'
 import { ago, num } from '../../lib/format'
 import { useWorkflowEvents } from '../../lib/workflowEvents'
-import { href, usePolling } from '../../lib/hooks'
-import { OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
+import { href, navigate, usePolling } from '../../lib/hooks'
+import { DownloadsDrawer, OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
 import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter } from '../../workflowsApi'
 
 const SITE_DOWNLOAD_ENABLED = false
@@ -102,6 +102,13 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <a
+            href={href('ler', data.slug)}
+            title="Abre o leitor em tela cheia, como num site de leitura"
+            className={`inline-flex items-center rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 ${chapters.some((c) => c.pages > 0) ? '' : 'pointer-events-none opacity-50'}`}
+          >
+            Ler (preview)
+          </a>
           {admin && (
             <>
               <Button variant="ghost" onClick={() => setManage('rename')}>Editar título</Button>
@@ -134,7 +141,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
       <Tabs<'chapters' | 'glossary'>
         value={tab}
         onChange={(t) => {
-          window.location.hash = t === 'glossary' ? href('s', slug, 'glossario') : href('s', slug)
+          navigate(t === 'glossary' ? href('s', slug, 'glossario') : href('s', slug))
         }}
         tabs={[
           { value: 'chapters', label: 'Capítulos' },
@@ -157,6 +164,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
           <Button size="sm" onClick={() => setExporting(true)} disabled={!exportable.length} title={exportable.length ? 'Baixa os capítulos selecionados num .zip, uma pasta por capítulo' : 'Selecione capítulos com páginas'}>
             Baixar .zip{exportable.length ? ` (${exportable.length})` : ''}
           </Button>
+          <DownloadsDrawer seriesId={data.id} />
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(chapters.filter((c) => c.pages > 0).map((c) => c.id)))}>
             Selecionar todos ({chapters.filter((c) => c.pages > 0).length})
           </Button>
@@ -214,7 +222,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
           }} />
           <DeleteSeriesDialog open={manage === 'delete'} series={data} chapters={chapters.length} pages={chapters.reduce((n, c) => n + c.pages, 0)} onClose={() => setManage(null)} onDeleted={() => {
             setManage(null)
-            window.location.hash = href()
+            navigate(href())
           }} />
         </>
       )}

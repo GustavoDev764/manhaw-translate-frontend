@@ -4,7 +4,7 @@ import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, EmptyState, Notice, Spinner, type Tone } from '../components/ui'
 import { cx } from '../lib/cx'
 import { chapterNo } from '../lib/format'
-import { href, usePolling } from '../lib/hooks'
+import { href, navigate, usePolling } from '../lib/hooks'
 
 const PAGE_STATE: Record<PageState, { label: string; tone: Tone; border: string }> = {
   done: { label: 'traduzida', tone: 'done', border: 'border-done' },
@@ -50,13 +50,13 @@ export function ChapterPagesPage({ slug, chapter }: { slug: string; chapter: str
         <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold">Capítulo {n}</h1>
           <div className="flex gap-2">
-            <Button size="sm" variant="primary" onClick={() => (window.location.hash = href('series', slug, 'read', chapter))}>
+            <Button size="sm" variant="primary" onClick={() => navigate(href('series', slug, 'read', chapter))}>
               Ler e anotar
             </Button>
-            <Button size="sm" onClick={() => (window.location.hash = href('series', slug, 'chapter', prevNext(chapter, -1)))}>
+            <Button size="sm" onClick={() => navigate(href('series', slug, 'chapter', prevNext(chapter, -1)))}>
               ← Anterior
             </Button>
-            <Button size="sm" onClick={() => (window.location.hash = href('series', slug, 'chapter', prevNext(chapter, 1)))}>
+            <Button size="sm" onClick={() => navigate(href('series', slug, 'chapter', prevNext(chapter, 1)))}>
               Próximo →
             </Button>
           </div>

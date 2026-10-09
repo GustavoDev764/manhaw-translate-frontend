@@ -3,7 +3,7 @@ import { useJobs } from '../components/jobsContext'
 import { QueueEntries } from '../components/QueueEntries'
 import { Badge, Card, EmptyState, Notice, Spinner, Stat, Tabs } from '../components/ui'
 import { num, usd } from '../lib/format'
-import { href, usePolling } from '../lib/hooks'
+import { href, navigate, usePolling } from '../lib/hooks'
 import { DownloadTab } from './series/DownloadTab'
 import { NotesTab } from './series/NotesTab'
 import { TranslateTab } from './series/TranslateTab'
@@ -67,7 +67,7 @@ export function SeriesPage({ slug, tab }: { slug: string; tab: Tab }) {
 
       <Tabs<Tab>
         value={tab}
-        onChange={(v) => (window.location.hash = href('series', slug, v))}
+        onChange={(v) => navigate(href('series', slug, v))}
         tabs={[
           { value: 'translate', label: 'Traduzir' },
           { value: 'download', label: 'Baixar do site' },

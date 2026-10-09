@@ -5,7 +5,7 @@ import { useJobs } from '../../components/jobsContext'
 import { Button, Card, Dialog, Dot, EmptyState, Field, inputClass, Notice, Spinner } from '../../components/ui'
 import { cx } from '../../lib/cx'
 import { chaptersLabel, num, usd } from '../../lib/format'
-import { href, usePolling } from '../../lib/hooks'
+import { href, navigate, usePolling } from '../../lib/hooks'
 
 const STATE_LABEL: Record<LocalChapter['translation'], string> = {
   done: 'traduzido',
@@ -102,7 +102,7 @@ export function TranslateTab({ series }: { series: SeriesDetail }) {
           presets={presets}
           onOpen={(n) => {
             const c = chapters.find((x) => x.number === n)
-            if (c) window.location.hash = href('series', series.slug, 'chapter', c.name)
+            if (c) navigate(href('series', series.slug, 'chapter', c.name))
           }}
         />
       </Card>

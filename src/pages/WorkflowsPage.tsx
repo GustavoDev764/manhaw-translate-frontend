@@ -3,7 +3,7 @@ import { useAuth } from '../auth/authCtx'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Notice, Spinner, Tabs, type Tone } from '../components/ui'
 import { ago, chaptersLabel, num, approxUsd, when } from '../lib/format'
-import { href, usePolling } from '../lib/hooks'
+import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
 import { WF_STATUS } from '../lib/workflowStatus'
 import { workflowsApi, type ItemError, type ItemStatus, type WorkflowType } from '../workflowsApi'
@@ -128,7 +128,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
     }
   }
   const close = () => {
-    window.location.hash = backTo
+    navigate(backTo)
   }
 
   return (
