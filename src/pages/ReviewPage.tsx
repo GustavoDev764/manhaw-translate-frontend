@@ -22,6 +22,7 @@ const MAX_FIT_SCALE = 2
 const FULL_KEY = 'review.fullscreen'
 const PANEL_KEY = 'review.panel'
 const CONTEXT_KEY = 'review.context'
+const SEAM_KEY = 'review.contextSeam'
 const CONTEXT_CHOICES = [0, 250, 500] as const
 const CONTEXT_GAP = 0
 const asset = assetViewUrl
@@ -90,6 +91,7 @@ export function ReviewPage({ pageId }: { pageId: string }) {
   const [panel, setPanel] = usePref(PANEL_KEY, true)
   const [hideText, setHideText] = useState(false)
   const [contextPx, setContextPx] = useStoredNumber(CONTEXT_KEY, CONTEXT_CHOICES, 250)
+  const [seam, setSeam] = usePref(SEAM_KEY, true)
   const draft = useLayerDraft(page, reload, useCallback((message: string) => toast('failed', message), [toast]))
   const draftUndo = draft.undo
   const lockedBy = page?.lock?.workflowId ?? null
@@ -261,6 +263,11 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                 </select>
               </label>
             )}
+            {(page.prev || page.next) && contextPx > 0 && (
+              <label className="ml-1 flex items-center gap-1.5 text-xs" title="Mostra a linha tracejada que separa esta página das vizinhas. Desmarque para ver a emenda como no leitor">
+                <input type="checkbox" className="accent-brand" checked={seam} onChange={(e) => setSeam(e.target.checked)} /> Linha
+              </label>
+            )}
             {mode === 'text' && (
               <label className="ml-1 flex items-center gap-1.5 text-xs">
                 <input type="checkbox" className="accent-brand" checked={square} onChange={(e) => setSquare(e.target.checked)} /> Quadrada
@@ -298,6 +305,7 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                 contextPx
                   ? {
                       px: contextPx,
+                      seam,
                       prev: page.prev ? { src: asset(page.prev.assetId), label: `Página ${page.prev.position}`, link: href('r', page.prev.id) } : null,
                       next: page.next ? { src: asset(page.next.assetId), label: `Página ${page.next.position}`, link: href('r', page.next.id) } : null,
                     }
@@ -416,7 +424,7 @@ function Stage({
   editable,
 }: {
   fit?: boolean
-  context?: { px: number; prev: Neighbor | null; next: Neighbor | null } | null
+  context?: { px: number; seam: boolean; prev: Neighbor | null; next: Neighbor | null } | null
   src: string
   fonts: FontRow[]
   textCanvas: boolean
@@ -503,8 +511,8 @@ function Stage({
 
   return (
     <div ref={box} className={cx('select-none', fit ? 'flex min-h-0 w-full flex-1 flex-col items-center overflow-hidden' : 'flex w-full flex-col')} style={{ rowGap: CONTEXT_GAP }} onDragStart={(e) => e.preventDefault()}>
-    {context?.prev && ctxTop > 0 && <NeighborStrip side="prev" neighbor={context.prev} height={ctxTop * scale} width={stripWidth} />}
-    <div ref={wrap} className={cx('relative z-10 shrink-0 rounded-lg bg-slate-100 dark:bg-slate-800', !fit && 'w-full')} style={{ width: fit ? nat.width * scale : undefined, height: nat.height * scale }}>
+    {context?.prev && ctxTop > 0 && <NeighborStrip side="prev" neighbor={context.prev} height={ctxTop * scale} width={stripWidth} seam={context.seam} />}
+    <div ref={wrap} className={cx('relative z-10 shrink-0 bg-slate-100 dark:bg-slate-800', !fit && 'w-full', context && !context.seam ? '' : 'rounded-lg')} style={{ width: fit ? nat.width * scale : undefined, height: nat.height * scale }}>
       <img
         src={src}
         alt="Página"
@@ -582,7 +590,7 @@ function Stage({
         {draft && <div className="pointer-events-none absolute border-2 border-brand bg-brand/10" style={{ left: draft.x, top: draft.y, width: draft.w, height: draft.h }} />}
       </div>
     </div>
-    {context?.next && ctxBottom > 0 && <NeighborStrip side="next" neighbor={context.next} height={ctxBottom * scale} width={stripWidth} />}
+    {context?.next && ctxBottom > 0 && <NeighborStrip side="next" neighbor={context.next} height={ctxBottom * scale} width={stripWidth} seam={context.seam} />}
     </div>
   )
 }
@@ -593,7 +601,7 @@ interface Neighbor {
   link: string
 }
 
-function NeighborStrip({ side, neighbor, height, width }: { side: 'prev' | 'next'; neighbor: Neighbor; height: number; width: number }) {
+function NeighborStrip({ side, neighbor, height, width, seam }: { side: 'prev' | 'next'; neighbor: Neighbor; height: number; width: number; seam: boolean }) {
   const where = side === 'prev' ? 'final' : 'começo'
   return (
     <a
@@ -601,7 +609,11 @@ function NeighborStrip({ side, neighbor, height, width }: { side: 'prev' | 'next
       data-testid={`neighbor-${side}`}
       title={`${neighbor.label} (${where}): clique para abrir`}
       aria-label={`Abrir ${neighbor.label}`}
-      className={cx('relative block shrink-0 overflow-hidden rounded-lg opacity-80 transition-opacity hover:opacity-100', side === 'prev' ? 'border-b-2 border-dashed border-brand/70' : 'border-t-2 border-dashed border-brand/70')}
+      className={cx(
+        'relative block shrink-0 overflow-hidden',
+        seam && 'rounded-lg opacity-80 transition-opacity hover:opacity-100',
+        seam && (side === 'prev' ? 'border-b-2 border-dashed border-brand/70' : 'border-t-2 border-dashed border-brand/70'),
+      )}
       style={{ height, width }}
     >
       <img src={neighbor.src} alt="" draggable={false} className={cx('absolute left-0 w-full select-none', side === 'prev' ? 'bottom-0' : 'top-0')} />
