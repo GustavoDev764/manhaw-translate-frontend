@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { DISABLED_REASON, useAuth } from '../../auth/authCtx'
+import { useConfirm, type ConfirmOptions } from '../../components/confirm'
 import { useJobs } from '../../components/jobsContext'
 import { Badge, Button, Card, EmptyState, inputClass, Notice, Spinner, Tabs } from '../../components/ui'
 import { num } from '../../lib/format'
@@ -41,9 +42,11 @@ export function GlossaryPanel({ seriesId }: { seriesId: string }) {
   }
   const d = list.data
   const news = d?.counts.new ?? 0
+  const [ask, confirmDialog] = useConfirm()
 
   return (
     <div className="space-y-3">
+      {confirmDialog}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Tabs<Filter>
           value={filter}
@@ -60,7 +63,7 @@ export function GlossaryPanel({ seriesId }: { seriesId: string }) {
         <div className="flex gap-2">
           <input className={`${inputClass} w-56`} placeholder="Buscar termo ou tradução" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar no glossário" />
           {news > 0 && (
-            <Button size="sm" disabled={!editable} title={editable ? '' : DISABLED_REASON} onClick={() => confirm(`Aprovar os ${news} termos novos como estão?`) && run(() => glossaryApi.approveAll(seriesId), `${news} termos aprovados.`)}>
+            <Button size="sm" disabled={!editable} title={editable ? '' : DISABLED_REASON} onClick={async () => (await ask({ title: 'Aprovar termos novos', message: `Aprovar os ${news} termos novos como estão?`, confirmLabel: 'Aprovar todos' })) && run(() => glossaryApi.approveAll(seriesId), `${news} termos aprovados.`)}>
               Aprovar todos os novos
             </Button>
           )}
@@ -98,7 +101,7 @@ export function GlossaryPanel({ seriesId }: { seriesId: string }) {
             </thead>
             <tbody>
               {d.rows.map((t) => (
-                <TermRow key={t.id} t={t} editable={editable} run={run} />
+                <TermRow key={t.id} t={t} editable={editable} run={run} ask={ask} />
               ))}
             </tbody>
           </table>
@@ -115,7 +118,7 @@ export function GlossaryPanel({ seriesId }: { seriesId: string }) {
   )
 }
 
-function TermRow({ t, editable, run }: { t: GlossaryTerm; editable: boolean; run: (fn: () => Promise<unknown>, ok: string) => Promise<boolean> }) {
+function TermRow({ t, editable, run, ask }: { t: GlossaryTerm; editable: boolean; run: (fn: () => Promise<unknown>, ok: string) => Promise<boolean>; ask: (options: ConfirmOptions) => Promise<boolean> }) {
   const [edit, setEdit] = useState(false)
   const [d, setD] = useState({ term: t.term, translation: t.translation, note: t.note ?? '' })
   if (edit) {
@@ -146,7 +149,7 @@ function TermRow({ t, editable, run }: { t: GlossaryTerm; editable: boolean; run
             {t.status === 'new' && <Button size="sm" onClick={() => run(() => glossaryApi.update(t.id, { status: 'approved' }), `"${t.term}" aprovado.`)}>Aprovar</Button>}
             <Button size="sm" variant="ghost" onClick={() => setEdit(true)}>Editar</Button>
             <Button size="sm" variant="ghost" onClick={() => run(() => glossaryApi.update(t.id, { locked: !t.locked }), t.locked ? 'Destravado.' : 'Travado: não pode ser removido.')}>{t.locked ? 'Destravar' : 'Travar'}</Button>
-            {!t.locked && <Button size="sm" variant="ghost" className="text-failed" onClick={() => confirm(`Remover "${t.term}" do glossário?`) && run(() => glossaryApi.remove(t.id), 'Termo removido.')}>Remover</Button>}
+            {!t.locked && <Button size="sm" variant="ghost" className="text-failed" onClick={async () => (await ask({ title: 'Remover termo', message: `Remover "${t.term}" do glossário?`, confirmLabel: 'Remover', danger: true })) && run(() => glossaryApi.remove(t.id), 'Termo removido.')}>Remover</Button>}
           </>
         )}
       </td>

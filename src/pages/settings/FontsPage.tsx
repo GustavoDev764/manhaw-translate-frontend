@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileLinks } from '../../components/FileLinks'
+import { useConfirm } from '../../components/confirm'
 import { useJobs } from '../../components/jobsContext'
 import { Badge, Button, Card, EmptyState, Field, inputClass, Notice, Spinner } from '../../components/ui'
 import { when } from '../../lib/format'
@@ -28,6 +29,7 @@ function readBase64(file: File): Promise<string> {
 export function FontsPage() {
   const { toast } = useJobs()
   const list = usePolling(reviewApi.fonts, 0, [])
+  const [ask, confirmDialog] = useConfirm()
   const rules = usePolling(reviewApi.fontRules, 0, [])
   const [picked, setPicked] = useState<Picked[]>([])
   const [busy, setBusy] = useState(false)
@@ -95,6 +97,7 @@ export function FontsPage() {
 
   return (
     <SettingsLayout active="fonts">
+      {confirmDialog}
       <div>
         <h1 className="text-2xl font-semibold">Fontes</h1>
         <p className="text-sm text-slate-500">Fontes para as caixas de texto da revisão. Valem para todas as scans.</p>
@@ -158,7 +161,7 @@ export function FontsPage() {
               <span className="flex items-center gap-1">
                 <FileLinks assetId={f.assetId} label={`fonte ${f.family}`} />
                 <Button size="sm" variant="ghost" className="text-failed" onClick={async () => {
-                  if (!confirm(`Remover a fonte ${f.family} (${f.style})?`)) return
+                  if (!(await ask({ title: 'Remover fonte', message: `Remover a fonte ${f.family} (${f.style})?`, confirmLabel: 'Remover', danger: true }))) return
                   try {
                     await reviewApi.removeFont(f.id)
                     toast('done', 'Fonte removida.')

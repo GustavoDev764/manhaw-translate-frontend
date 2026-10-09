@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useConfirm } from '../components/confirm'
 import { FileLinks } from '../components/FileLinks'
 import { assetViewUrl } from '../lib/assets'
 import { DISABLED_REASON, useAuth } from '../auth/authCtx'
@@ -709,11 +710,23 @@ function CommentsPanel({ page, busy, run }: { page: Page; busy: boolean; run: (f
 function HistoryPanel({ page, busy, locked, viewing, onView, run }: { page: Page; busy: boolean; locked: boolean; viewing: string | null; onView: (assetId: string, number: number) => void; run: (fn: () => Promise<unknown>, ok?: string) => Promise<unknown> }) {
   const { can } = useAuth()
   const base = page.cleanBase
-  const resetBase = () =>
-    confirm('Voltar a base limpa para a original (balões vazios do início)? As caixas de texto continuam como estão e são desenhadas de novo por cima.') &&
-    run(() => reviewApi.resetClean(page.id), 'Voltando a base para a original: a página ganha uma versão nova.')
+  const [ask, confirmDialog] = useConfirm()
+  const resetBase = async () => {
+    const ok = await ask({
+      title: 'Resetar imagem base',
+      message: (
+        <>
+          <p>A imagem de fundo desta página (os balões vazios, sem texto) volta para a original.</p>
+          <p>As caixas de texto não mudam: elas são desenhadas de novo por cima e a página ganha uma versão nova.</p>
+        </>
+      ),
+      confirmLabel: 'Resetar base',
+    })
+    if (ok) await run(() => reviewApi.resetClean(page.id), 'Voltando a base para a original: a página ganha uma versão nova.')
+  }
   const baseCard = base && page.cleanAssetId && (
     <div className="mb-3 rounded-lg border border-slate-200 p-2 text-sm dark:border-slate-800">
+      {confirmDialog}
       <div className="flex items-center gap-1.5">
         <b>Base limpa</b>
         {base.isOriginal ? <Badge>original</Badge> : <Badge tone="brand">alterada</Badge>}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useConfirm } from '../../components/confirm'
 import { useJobs } from '../../components/jobsContext'
 import { PasswordField } from '../../components/password'
 import { Badge, Button, Card, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../../components/ui'
@@ -112,6 +113,7 @@ function TemplatesTab() {
 function TemplateEditor({ tpl, onSaved, toast }: { tpl: EmailTemplate; onSaved: () => Promise<void>; toast: (tone: 'done' | 'failed', text: string) => void }) {
   const [subject, setSubject] = useState(tpl.subject)
   const [html, setHtml] = useState(tpl.html)
+  const [ask, confirmDialog] = useConfirm()
   const [text, setText] = useState(tpl.text)
   const [active, setActive] = useState(tpl.active)
   const [preview, setPreview] = useState<{ subject: string; html: string } | null>(null)
@@ -134,6 +136,7 @@ function TemplateEditor({ tpl, onSaved, toast }: { tpl: EmailTemplate; onSaved: 
   }
   return (
     <div className="grid gap-4 xl:grid-cols-2">
+      {confirmDialog}
       <Card className="space-y-3 p-4">
         <Field label="Assunto"><input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
         <Field label="HTML"><textarea className={`${inputClass} h-64 font-mono text-xs`} value={html} onChange={(e) => setHtml(e.target.value)} spellCheck={false} /></Field>
@@ -144,7 +147,7 @@ function TemplateEditor({ tpl, onSaved, toast }: { tpl: EmailTemplate; onSaved: 
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-brand" checked={active} onChange={(e) => setActive(e.target.checked)} /> Enviar este e-mail</label>
         <div className="flex gap-2">
           <Button variant="primary" disabled={busy} onClick={() => run(() => emailApi.saveTemplate(tpl.key, { subject, html, text, active }), 'Modelo salvo.')}>Salvar</Button>
-          <Button variant="ghost" disabled={busy} onClick={() => confirm('Voltar ao texto padrão deste modelo?') && run(() => emailApi.restoreTemplate(tpl.key), 'Modelo restaurado.')}>Restaurar padrão</Button>
+          <Button variant="ghost" disabled={busy} onClick={async () => (await ask({ title: 'Restaurar padrão', message: 'Voltar ao texto padrão deste modelo? O texto atual é substituído.', confirmLabel: 'Restaurar' })) && run(() => emailApi.restoreTemplate(tpl.key), 'Modelo restaurado.')}>Restaurar padrão</Button>
         </div>
       </Card>
       <Card className="space-y-2 p-4">

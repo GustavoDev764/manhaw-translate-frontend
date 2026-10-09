@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../../api'
 import { ModelConfigPicker, ModelSummary } from '../../components/ModelConfigPicker'
+import { useConfirm } from '../../components/confirm'
 import { useJobs } from '../../components/jobsContext'
 import { PasswordField } from '../../components/password'
 import { Badge, Button, Card, EmptyState, Notice, Spinner } from '../../components/ui'
@@ -13,6 +14,7 @@ import { ScanPicker, SettingsLayout } from './SettingsLayout'
 export function ScanApiKeyPage() {
   const choice = useScanChoice()
   const { toast } = useJobs()
+  const [ask, confirmDialog] = useConfirm()
   const info = usePolling(() => (choice.scanId ? keysApi.scanInfo(choice.scanId) : Promise.resolve(null)), 0, [choice.scanId])
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -39,6 +41,7 @@ export function ScanApiKeyPage() {
 
   return (
     <SettingsLayout active="api-key">
+      {confirmDialog}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">API key da Claude</h1>
@@ -97,7 +100,7 @@ export function ScanApiKeyPage() {
                   </Button>
                 )}
                 {d.ownLast4 && (
-                  <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => confirm('Remover a chave própria da scan?') && run('rm', () => keysApi.removeOwn(choice.scanId), 'Chave própria removida.')}>
+                  <Button size="sm" variant="ghost" disabled={!!busy} onClick={async () => (await ask({ title: 'Remover chave própria', message: 'Remover a chave própria da scan? A scan volta a usar a chave do administrador, se houver.', confirmLabel: 'Remover', danger: true })) && run('rm', () => keysApi.removeOwn(choice.scanId), 'Chave própria removida.')}>
                     Remover
                   </Button>
                 )}
