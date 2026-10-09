@@ -81,6 +81,7 @@ export interface ReviewPage {
   unpublished: boolean
   editLock: { userId: string; name: string; expiresAt: string } | null
   approved: { by: string; at: string } | null
+  reported: { by: string; at: string } | null
   lock: { workflowId: number; stage: WorkflowType; label: string } | null
   versions: ReviewVersion[]
   comments: ReviewComment[]
@@ -142,6 +143,8 @@ export const reviewApi = {
   releaseEditLock: (pageId: string) => del<{ ok: true }>(`/review/pages/${pageId}/edit-lock`),
   resetClean: (pageId: string) => post<{ id: number }>(`/review/pages/${pageId}/reset-clean`),
   restore: (pageId: string, versionId: string) => post<{ id: string; number: number }>(`/review/pages/${pageId}/restore`, { versionId }),
+  reportReview: (pageId: string) => post<{ ok: true; already?: boolean }>(`/review/pages/${pageId}/report-review`),
+  clearReport: (pageId: string) => del<{ ok: true }>(`/review/pages/${pageId}/report-review`),
   approve: (pageId: string, approved: boolean) => post<{ ok: true }>(`/review/pages/${pageId}/approve`, { approved }),
   fonts: () => request<FontRow[]>('/fonts'),
   fontRules: () => request<FontRules>('/fonts/rules'),

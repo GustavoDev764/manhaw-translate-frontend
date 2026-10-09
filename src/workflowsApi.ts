@@ -51,6 +51,7 @@ export interface LibraryChapter {
   cleaned: number
   rendered: number
   approved: number
+  reported: number
   locked: number
   lock: { workflowId: number; stage: WorkflowType } | null
   import: { status: 'extracting'; workflowId: number } | { status: 'failed'; workflowId: number; message: string | null } | null
@@ -74,6 +75,7 @@ export interface LibraryPage {
   current: { versionId: string; number: number; assetId: string; changeType: string; at: string } | null
   lock: { workflowId: number; stage: WorkflowType } | null
   unpublished: boolean
+  reported: { by: string; at: string } | null
 }
 
 export interface SiteChapters {

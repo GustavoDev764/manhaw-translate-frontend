@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
+import { AlertTriangle } from '../../components/AlertTriangle'
 import { FileLinks } from '../../components/FileLinks'
 import { assetViewUrl } from '../../lib/assets'
 import { LaunchDialog } from '../../components/LaunchDialog'
 import { StageActions } from '../../components/StageActions'
 import { Badge, Button, Card, EmptyState, Notice, Spinner } from '../../components/ui'
 import { cx } from '../../lib/cx'
-import { num } from '../../lib/format'
+import { num, when } from '../../lib/format'
 import { href, usePolling } from '../../lib/hooks'
 import { libraryApi, STAGE_LABEL, type LaunchInput, type LibraryPage } from '../../workflowsApi'
 
@@ -23,12 +24,14 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [launch, setLaunch] = useState<Omit<LaunchInput, 'force'> | null>(null)
   const [onlyFree, setOnlyFree] = useState(false)
+  const [onlyReported, setOnlyReported] = useState(false)
 
   const pages = useMemo(() => data?.pages ?? [], [data])
   const free = pages.filter((p) => !p.lock)
   const locked = pages.length - free.length
   const chosen = pages.filter((p) => selected.has(p.id))
-  const shown = onlyFree ? free : pages
+  const reported = pages.filter((p) => p.reported).length
+  const shown = (onlyFree ? free : pages).filter((p) => !onlyReported || p.reported)
   const toggle = (id: string) =>
     setSelected((s) => {
       const n = new Set(s)
@@ -54,6 +57,11 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
         <h1 className="text-2xl font-semibold">Capítulo {data.chapter.number}</h1>
         <p className="text-sm text-slate-500">
           {num(pages.length)} páginas{locked ? ` · ${num(locked)} em outro processo` : ''}
+          {reported > 0 && (
+            <span className="ml-1 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+              · <AlertTriangle className="size-3.5" /> {num(reported)} com revisão relatada
+            </span>
+          )}
         </p>
       </div>
 
@@ -68,6 +76,12 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
           <Button size="sm" variant={locked ? 'primary' : 'ghost'} onClick={() => setSelected(new Set(free.map((p) => p.id)))} disabled={!free.length}>
             Selecionar páginas livres ({free.length})
           </Button>
+          {(reported > 0 || onlyReported) && (
+            <Button size="sm" variant={onlyReported ? 'primary' : 'ghost'} onClick={() => setOnlyReported((v) => !v)} title="Mostra só as páginas que alguém relatou para revisão">
+              <AlertTriangle className="mr-1 size-3.5" />
+              {onlyReported ? 'Mostrar todas' : `Só relatadas (${reported})`}
+            </Button>
+          )}
           {locked > 0 && (
             <Button size="sm" variant="ghost" onClick={() => setOnlyFree((v) => !v)}>
               {onlyFree ? 'Mostrar todas' : 'Só as livres'}
@@ -118,6 +132,11 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
               {asset && <FileLinks assetId={asset} label={`página ${p.position}`} className="flex justify-center border-t border-slate-100 py-1 dark:border-slate-800" />}
               {p.status === 'no_text' && <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-slate-900/70 px-1.5 text-[10px] text-white">sem texto</span>}
               {p.current && <span className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-slate-900/70 px-1.5 text-[10px] text-white">v{p.current.number}</span>}
+              {p.reported && (
+                <span className="absolute right-1.5 top-7 grid size-6 place-items-center rounded-full bg-amber-500 text-white shadow" title={`Revisão relatada por ${p.reported.by} em ${when(p.reported.at)}`} aria-label="Revisão relatada">
+                  <AlertTriangle className="size-3.5" />
+                </span>
+              )}
               {p.unpublished && <span className="pointer-events-none absolute left-1.5 top-7 rounded bg-queued px-1.5 text-[10px] font-medium text-white" title="Há alterações nas caixas de texto que ainda não viraram versão">não publicada</span>}
               {p.lock && (
                 <span className="pointer-events-none absolute inset-x-1.5 bottom-9">

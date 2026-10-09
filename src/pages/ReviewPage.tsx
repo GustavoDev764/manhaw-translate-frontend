@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/confirm'
+import { AlertTriangle } from '../components/AlertTriangle'
 import { FileLinks } from '../components/FileLinks'
 import { assetViewUrl } from '../lib/assets'
 import { DISABLED_REASON, useAuth } from '../auth/authCtx'
@@ -194,6 +195,17 @@ export function ReviewPage({ pageId }: { pageId: string }) {
             {current && <Badge tone="neutral">v{current.number}</Badge>}
           </h1>
         </div>
+        {page.reported && (
+          <div className="order-last flex w-full items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300">
+            <AlertTriangle className="size-4 shrink-0" />
+            <span className="flex-1">
+              Revisão relatada por <b>{page.reported.by}</b> em {when(page.reported.at)}.
+            </span>
+            <Button size="sm" disabled={busy} onClick={() => run(() => reviewApi.clearReport(page.id), 'Marcada como revisada.')}>
+              Marcar como revisada
+            </Button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <a href={page.prevId ? href('r', page.prevId) : undefined} aria-disabled={!page.prevId}>
             <Button size="sm" disabled={!page.prevId} title="Página anterior (←)">← Anterior</Button>

@@ -10,6 +10,7 @@ import { DeleteSeriesDialog, RenameSeriesDialog } from './SeriesManageDialogs'
 import { ago, num } from '../../lib/format'
 import { useWorkflowEvents } from '../../lib/workflowEvents'
 import { href, navigate, usePolling } from '../../lib/hooks'
+import { AlertTriangle } from '../../components/AlertTriangle'
 import { DownloadsDrawer, OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
 import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter } from '../../workflowsApi'
 
@@ -308,6 +309,11 @@ function ChapterRow({ c, slug, checked, onToggle, upload, onDismiss }: { c: Libr
         <a href={href('s', slug, c.id)} className="hover:text-brand">
           Cap. {c.number}
         </a>
+        {c.reported > 0 && (
+          <a href={href('s', slug, c.id)} className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-medium text-amber-600 dark:text-amber-400" title={`${c.reported} ${c.reported === 1 ? 'página com revisão relatada' : 'páginas com revisão relatada'}`}>
+            <AlertTriangle className="size-3.5" /> {c.reported}
+          </a>
+        )}
         {upload && <UploadStatus u={upload} onDismiss={() => onDismiss(upload.id)} />}
         {!sending && c.import?.status === 'extracting' && (
           <a href={href('workflows', String(c.import.workflowId))} className="mt-1 block text-xs font-medium text-queued">

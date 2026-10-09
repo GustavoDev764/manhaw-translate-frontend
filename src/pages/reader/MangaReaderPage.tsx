@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { AlertTriangle } from '../../components/AlertTriangle'
 import { assetViewUrl } from '../../lib/assets'
 import { href, usePolling } from '../../lib/hooks'
+import { reviewApi } from '../../reviewApi'
 import { libraryApi, type LibraryChapter, type LibraryPage } from '../../workflowsApi'
 
 const THEME = {
@@ -69,6 +71,9 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loadingNext, setLoadingNext] = useState(false)
+  const [reportedNow, setReportedNow] = useState<Record<string, boolean>>({})
+  const [flash, setFlash] = useState<string | null>(null)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scroller = useRef<HTMLDivElement>(null)
   const tracker = useRef<IntersectionObserver | null>(null)
   const busy = useRef(false)
@@ -195,6 +200,32 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   }, [chapters, filter])
 
   const progress = currentPages ? ((current?.page ?? 0) + 1) / currentPages : 0
+  const currentPage = loaded.find((l) => l.chapter.id === currentChapter?.id)?.pages[current?.page ?? 0]
+  const isReported = currentPage ? (reportedNow[currentPage.id] ?? !!currentPage.reported) : false
+
+  const say = (text: string) => {
+    setFlash(text)
+    clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(null), 2500)
+  }
+
+  const toggleReport = async () => {
+    if (!currentPage || !currentChapter) return
+    const n = (current?.page ?? 0) + 1
+    try {
+      if (isReported) {
+        await reviewApi.clearReport(currentPage.id)
+        setReportedNow((r) => ({ ...r, [currentPage.id]: false }))
+        say(`Relato da página ${n} retirado.`)
+      } else {
+        await reviewApi.reportReview(currentPage.id)
+        setReportedNow((r) => ({ ...r, [currentPage.id]: true }))
+        say(`Página ${n} do ${label(currentChapter).toLowerCase()} relatada para revisão.`)
+      }
+    } catch (err) {
+      say(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   return (
     <div style={THEME} className="fixed inset-0 z-50 bg-[var(--reader-bg)] text-[var(--reader-text)]">
@@ -282,12 +313,22 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
           <BarButton title="Topo do capítulo (Home)" onClick={toTop}>
             <Icon d={ICON.top} />
           </BarButton>
+          <BarButton title={isReported ? 'Revisão já relatada nesta página (clique para retirar)' : 'Relatar revisão nesta página'} onClick={() => void toggleReport()} disabled={!currentPage}>
+            <span className={isReported ? 'text-amber-400' : ''}>
+              <AlertTriangle className="size-5" filled={isReported} />
+            </span>
+          </BarButton>
           <BarButton title="Próximo capítulo (→)" onClick={() => goTo(1)} disabled={currentIndex < 0 || currentIndex >= chapters.length - 1}>
             <Icon d={ICON.next} />
           </BarButton>
         </div>
       </div>
 
+      {flash && (
+        <div role="status" className="pointer-events-none fixed inset-x-0 bottom-20 z-20 flex justify-center px-4">
+          <div className="rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] px-4 py-2 text-sm shadow-2xl backdrop-blur-md">{flash}</div>
+        </div>
+      )}
       {drawer && <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-sm" onClick={() => setDrawer(false)} aria-hidden />}
       <aside
         aria-label="Capítulos"
