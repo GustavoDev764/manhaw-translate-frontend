@@ -1,7 +1,7 @@
 import { del, patch, post, put, request } from './api'
 
 export type LaunchType = 'download' | 'scan' | 'translate' | 'cleanup' | 'render'
-export type WorkflowType = LaunchType | 'import' | 'fix_area' | 'edit_text' | 'delete'
+export type WorkflowType = LaunchType | 'import' | 'fix_area' | 'edit_text' | 'delete' | 'export'
 export type WorkflowStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'partial' | 'canceled'
 export type ItemStatus = 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'canceled' | 'waiting_key'
 
@@ -15,6 +15,7 @@ export const STAGE_LABEL: Record<WorkflowType, string> = {
   fix_area: 'Corrigir área',
   edit_text: 'Editar texto',
   delete: 'Excluir arquivos',
+  export: 'Gerar zip',
 }
 
 export const STAGE_HELP: Record<LaunchType, string> = {
@@ -210,7 +211,34 @@ export function chapterSpec(numbers: number[]): string {
   return parts.join(',')
 }
 
-export const exportUrl = (seriesId: string, numbers: number[], kind: ExportKind) => `/api/library/series/${seriesId}/export?chapters=${encodeURIComponent(chapterSpec(numbers))}&kind=${kind}`
+export interface ChapterExport {
+  id: string
+  status: 'pending' | 'ready' | 'failed'
+  fileName: string
+  kind: ExportKind
+  spec: string
+  chapters: number
+  series: { id: string; slug: string; title: string } | null
+  sizeBytes: number | null
+  pages: number | null
+  missing: number | null
+  error: string | null
+  workflowId: number | null
+  by: string
+  createdAt: string
+  readyAt: string | null
+  expiresAt: string
+  canDelete: boolean
+}
+
+export const DOWNLOADS_CHANGED = 'downloads:changed'
+
+export const exportsApi = {
+  create: (seriesId: string, numbers: number[], kind: ExportKind) => post<{ id: string; workflowId: number | null; reused?: boolean }>(`/library/series/${seriesId}/exports`, { chapters: chapterSpec(numbers), kind }),
+  list: () => request<ChapterExport[]>('/exports'),
+  remove: (id: string) => del<{ ok: true }>(`/exports/${id}`),
+  downloadUrl: (id: string) => `/api/exports/${id}/download`,
+}
 
 export const libraryApi = {
   series: (filter: { q?: string; scanId?: string } = {}) => request<LibrarySeries[]>(`/library/series${qs(filter)}`),

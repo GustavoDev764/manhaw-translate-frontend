@@ -1,6 +1,7 @@
 import { ROLE_LABEL } from './adminApi'
 import { AuthProvider } from './auth/AuthContext'
 import { useAuth } from './auth/authCtx'
+import { DownloadsDrawer } from './components/DownloadsDrawer'
 import { EventsBridge } from './components/events'
 import { JobsProvider } from './components/jobs'
 import { UploadsProvider } from './components/uploads'
@@ -67,6 +68,7 @@ function Nav({ section }: { section: string }) {
         <nav className="flex flex-wrap gap-1">
           {link(href(), 'Manhwas', section === '' || section === 's' || section === 'series')}
           {link(href('workflows'), 'Workflows', section === 'workflows')}
+          {me && !me.mustChangePassword && <DownloadsDrawer />}
           {me?.role === 'system_admin' && running > 0 && link(
             href('jobs'),
             <>

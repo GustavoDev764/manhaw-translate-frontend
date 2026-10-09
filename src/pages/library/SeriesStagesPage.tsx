@@ -10,7 +10,8 @@ import { DeleteSeriesDialog, RenameSeriesDialog } from './SeriesManageDialogs'
 import { ago, num } from '../../lib/format'
 import { useWorkflowEvents } from '../../lib/workflowEvents'
 import { href, usePolling } from '../../lib/hooks'
-import { chapterSpec, exportUrl, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter } from '../../workflowsApi'
+import { OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
+import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter } from '../../workflowsApi'
 
 const SITE_DOWNLOAD_ENABLED = false
 
@@ -459,14 +460,20 @@ function ExportDialog({ open, seriesId, chapters, onClose }: { open: boolean; se
   const pages = chapters.reduce((s, c) => s + c.pages, 0)
   const translated = chapters.reduce((s, c) => s + c.rendered, 0)
   const numbers = chapters.map((c) => c.number).sort((a, b) => a - b)
-  const start = () => {
-    const a = document.createElement('a')
-    a.href = exportUrl(seriesId, numbers, kind)
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    onClose()
+  const { toast } = useJobs()
+  const [sending, setSending] = useState(false)
+  const start = async () => {
+    setSending(true)
+    try {
+      const r = await exportsApi.create(seriesId, numbers, kind)
+      toast('done', r.reused ? 'Esse zip já existe: está em Downloads.' : 'Gerando o zip. Ele aparece em Downloads quando ficar pronto.')
+      onClose()
+      window.dispatchEvent(new Event(OPEN_DOWNLOADS))
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setSending(false)
+    }
   }
   return (
     <Dialog
@@ -476,8 +483,8 @@ function ExportDialog({ open, seriesId, chapters, onClose }: { open: boolean; se
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={start} disabled={!chapters.length}>
-            Baixar .zip
+          <Button variant="primary" onClick={start} disabled={!chapters.length || sending}>
+            {sending ? <Spinner /> : 'Gerar .zip'}
           </Button>
         </>
       }
@@ -501,7 +508,7 @@ function ExportDialog({ open, seriesId, chapters, onClose }: { open: boolean; se
             </span>
           </label>
         </fieldset>
-        <p className="text-xs text-slate-500">O download começa na hora e o navegador mostra o progresso. Muitos capítulos podem dar alguns GB.</p>
+        <p className="text-xs text-slate-500">O zip é montado no servidor e aparece em Downloads (no topo da tela) quando ficar pronto. Fica disponível por 24 horas para qualquer pessoa da scan.</p>
       </div>
     </Dialog>
   )
