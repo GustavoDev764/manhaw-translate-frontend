@@ -696,9 +696,52 @@ function CommentsPanel({ page, busy, run }: { page: Page; busy: boolean; run: (f
 
 function HistoryPanel({ page, busy, locked, viewing, onView, run }: { page: Page; busy: boolean; locked: boolean; viewing: string | null; onView: (assetId: string, number: number) => void; run: (fn: () => Promise<unknown>, ok?: string) => Promise<unknown> }) {
   const { can } = useAuth()
-  if (!page.versions.length) return <p className="py-6 text-center text-sm text-slate-500">Ainda sem versões: a página só tem o original.</p>
+  const base = page.cleanBase
+  const resetBase = () =>
+    confirm('Voltar a base limpa para a original (balões vazios do início)? As caixas de texto continuam como estão e são desenhadas de novo por cima.') &&
+    run(() => reviewApi.resetClean(page.id), 'Voltando a base para a original: a página ganha uma versão nova.')
+  const baseCard = base && page.cleanAssetId && (
+    <div className="mb-3 rounded-lg border border-slate-200 p-2 text-sm dark:border-slate-800">
+      <div className="flex items-center gap-1.5">
+        <b>Base limpa</b>
+        {base.isOriginal ? <Badge>original</Badge> : <Badge tone="brand">alterada</Badge>}
+      </div>
+      <div className="text-xs text-slate-500">
+        {base.isOriginal ? 'A imagem sem texto onde as caixas são desenhadas é a original.' : 'A imagem sem texto foi alterada (ex.: Apagar texto). Se ficou estragada, volte para a original.'}
+      </div>
+      <div className="mt-2 flex gap-2">
+        <figure className="text-center text-xs text-slate-500">
+          <img src={asset(base.originalAssetId)} alt="" loading="lazy" className="h-20 w-14 rounded object-cover object-top" />
+          <figcaption>original</figcaption>
+        </figure>
+        {!base.isOriginal && (
+          <figure className="text-center text-xs text-slate-500">
+            <img src={asset(page.cleanAssetId)} alt="" loading="lazy" className="h-20 w-14 rounded object-cover object-top" />
+            <figcaption>atual</figcaption>
+          </figure>
+        )}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <FileLinks assetId={base.originalAssetId} label="base original" />
+        {!base.isOriginal && (
+          <Button size="sm" disabled={busy || locked || !can('restore_version')} title={can('restore_version') ? 'Volta só a imagem de fundo (balões vazios) para a original; as caixas de texto não mudam' : DISABLED_REASON} onClick={resetBase}>
+            Resetar imagem base
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+  if (!page.versions.length)
+    return (
+      <>
+        {baseCard}
+        <p className="py-6 text-center text-sm text-slate-500">Ainda sem versões: a página só tem o original.</p>
+      </>
+    )
   return (
-    <ol className="max-h-[65vh] space-y-2 overflow-y-auto">
+    <>
+      {baseCard}
+      <ol className="max-h-[65vh] space-y-2 overflow-y-auto">
       {page.versions.map((v) => (
         <li key={v.id} className={cx('flex gap-2.5 rounded-lg border p-2 text-sm', v.current ? 'border-brand' : 'border-slate-200 dark:border-slate-800', viewing === v.assetId && 'bg-brand/5')}>
           <img src={asset(v.assetId)} alt="" loading="lazy" className="h-20 w-14 shrink-0 rounded object-cover object-top" />
@@ -723,6 +766,7 @@ function HistoryPanel({ page, busy, locked, viewing, onView, run }: { page: Page
           </div>
         </li>
       ))}
-    </ol>
+      </ol>
+    </>
   )
 }

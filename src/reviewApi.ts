@@ -73,6 +73,7 @@ export interface ReviewPage {
   series: { id: string; slug: string; title: string }
   originalAssetId: string | null
   cleanAssetId: string | null
+  cleanBase: { originalAssetId: string; versions: number; isOriginal: boolean } | null
   size: { width: number; height: number } | null
   currentVersionId: string | null
   editable: boolean
@@ -137,6 +138,7 @@ export const reviewApi = {
   applyText: (pageId: string) => post<{ id: number }>(`/review/pages/${pageId}/apply-text`),
   takeEditLock: (pageId: string) => post<{ expiresAt: string }>(`/review/pages/${pageId}/edit-lock`),
   releaseEditLock: (pageId: string) => del<{ ok: true }>(`/review/pages/${pageId}/edit-lock`),
+  resetClean: (pageId: string) => post<{ id: number }>(`/review/pages/${pageId}/reset-clean`),
   restore: (pageId: string, versionId: string) => post<{ id: string; number: number }>(`/review/pages/${pageId}/restore`, { versionId }),
   approve: (pageId: string, approved: boolean) => post<{ ok: true }>(`/review/pages/${pageId}/approve`, { approved }),
   fonts: () => request<FontRow[]>('/fonts'),
