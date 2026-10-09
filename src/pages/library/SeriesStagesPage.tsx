@@ -4,7 +4,7 @@ import { LaunchDialog } from '../../components/LaunchDialog'
 import { StageActions } from '../../components/StageActions'
 import { useJobs } from '../../components/jobsContext'
 import { UPLOAD_DONE_EVENT, useUploads, type Upload } from '../../components/uploadsContext'
-import { Badge, Button, Card, Dialog, EmptyState, Notice, Spinner, Tabs } from '../../components/ui'
+import { Badge, Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../../components/ui'
 import { GlossaryPanel } from './GlossaryPanel'
 import { DeleteSeriesDialog, RenameSeriesDialog } from './SeriesManageDialogs'
 import { ago, num } from '../../lib/format'
@@ -35,6 +35,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const [launch, setLaunch] = useState<Omit<LaunchInput, 'force'> | null>(null)
   const [downloadOpen, setDownloadOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [ranging, setRanging] = useState(false)
   const { uploads, add: addUploads, dismiss } = useUploads()
   const zipInput = useRef<HTMLInputElement>(null)
   const seriesId = data?.id
@@ -161,6 +162,9 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(free.map((c) => c.id)))}>
             Selecionar livres ({free.length})
           </Button>
+          <Button size="sm" variant="ghost" onClick={() => setRanging(true)} disabled={!free.length} title="Escolhe do capítulo X até o Y de uma vez">
+            Selecionar intervalo
+          </Button>
           {selected.size > 0 && (
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
               Limpar seleção
@@ -218,6 +222,15 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
         void reload()
       }} />
       <ExportDialog open={exporting} seriesId={data.id} chapters={exportable} onClose={() => setExporting(false)} />
+      <RangeDialog
+        open={ranging}
+        chapters={chapters}
+        onClose={() => setRanging(false)}
+        onPick={(ids) => {
+          setSelected((prev) => new Set([...prev, ...ids]))
+          setRanging(false)
+        }}
+      />
       <DownloadDialog open={downloadOpen} seriesId={data.id} onClose={() => setDownloadOpen(false)} onPick={(numbers) => {
         setDownloadOpen(false)
         setLaunch({ type: 'download', seriesId: data.id, chapterNumbers: numbers })
@@ -374,6 +387,70 @@ function HowToTranslate() {
         <b>Atenção:</b> o <b>Baixar .zip</b> entrega a última versão publicada de cada página. Página que nunca foi publicada sai como o <b>original em inglês</b>. Capítulos importados já vêm escaneados e limpos; os que tinham tradução já vêm publicados.
       </p>
     </details>
+  )
+}
+
+function RangeDialog({ open, chapters, onClose, onPick }: { open: boolean; chapters: LibraryChapter[]; onClose: () => void; onPick: (ids: string[]) => void }) {
+  const numbers = chapters.filter((c) => c.pages > 0).map((c) => c.number)
+  const min = numbers.length ? Math.min(...numbers) : 1
+  const max = numbers.length ? Math.max(...numbers) : 1
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const a = from.trim() === '' ? min : Number(from)
+  const b = to.trim() === '' ? max : Number(to)
+  const valid = Number.isFinite(a) && Number.isFinite(b)
+  const [lo, hi] = a <= b ? [a, b] : [b, a]
+  const inRange = valid ? chapters.filter((c) => c.number >= lo && c.number <= hi && c.pages > 0) : []
+  const pick = inRange.filter((c) => !c.locked)
+  const busy = inRange.length - pick.length
+  const submit = () => {
+    if (!pick.length) return
+    onPick(pick.map((c) => c.id))
+    setFrom('')
+    setTo('')
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Selecionar intervalo de capítulos"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="primary" disabled={!pick.length} onClick={submit}>
+            Selecionar {pick.length ? `${pick.length} ${pick.length === 1 ? 'capítulo' : 'capítulos'}` : ''}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Do capítulo">
+            <input className={inputClass} type="number" inputMode="decimal" step="any" placeholder={String(min)} value={from} onChange={(e) => setFrom(e.target.value)} autoFocus />
+          </Field>
+          <Field label="Até o capítulo">
+            <input className={inputClass} type="number" inputMode="decimal" step="any" placeholder={String(max)} value={to} onChange={(e) => setTo(e.target.value)} />
+          </Field>
+        </div>
+        <p className="text-xs text-slate-500">
+          {!valid
+            ? 'Digite números de capítulo.'
+            : pick.length
+              ? `Do ${lo} ao ${hi}: ${pick.length} ${pick.length === 1 ? 'capítulo entra' : 'capítulos entram'} na seleção, somando aos que já estão marcados.`
+              : `Nenhum capítulo livre com páginas entre ${lo} e ${hi}.`}
+          {busy > 0 && ` ${busy} ${busy === 1 ? 'fica de fora por estar' : 'ficam de fora por estarem'} em outro processo.`}
+        </p>
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
   )
 }
 
