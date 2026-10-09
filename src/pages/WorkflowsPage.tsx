@@ -21,7 +21,7 @@ const ITEM_STATUS: Record<ItemStatus, { label: string; tone: Tone }> = {
 
 type Filter = 'active' | 'all' | 'failed' | 'mine'
 
-const PROGRESS_VERB: Partial<Record<WorkflowType, string>> = { scan: 'Escaneando página', render: 'Desenhando página', delete: 'Apagando arquivo', import: 'Importando página' }
+const PROGRESS_VERB: Partial<Record<WorkflowType, string>> = { scan: 'Escaneando página', render: 'Desenhando página', delete: 'Apagando arquivo', import: 'Importando página', export: 'Zipando capítulo' }
 
 export function ProgressLine({ verb, done, total, prefix }: { verb: string; done: number; total: number; prefix?: string }) {
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0
