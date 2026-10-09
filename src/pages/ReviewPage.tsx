@@ -9,7 +9,7 @@ import { cx } from '../lib/cx'
 import { ago, when } from '../lib/format'
 import { href, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
-import { CHANGE_LABEL, loadFont, reviewApi, type CommentAction, type FontRow, type Rect, type ReviewPage as Page, type TextLayer } from '../reviewApi'
+import { CHANGE_LABEL, loadFont, reviewApi, type CommentAction, type FontRow, type Rect, type ReviewComment, type ReviewPage as Page, type TextLayer } from '../reviewApi'
 import { LayerCanvas, TextPanel } from './review/TextEditing'
 import { HANDLES, handleCursor, moveBox, resizeBox, rotationTo, roundBox, type Box, type Handle } from './review/boxGeometry'
 import { useEditLock, useLayerDraft } from './review/useLayerDraft'
@@ -672,10 +672,18 @@ function AreaDialog({ area, onClean, onClose, onSend }: { area: Rect | null; onC
 }
 
 function CommentsPanel({ page, busy, run }: { page: Page; busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<unknown> }) {
-  const { can } = useAuth()
+  const { can, me } = useAuth()
+  const [ask, confirmDialog] = useConfirm()
   if (!page.comments.length) return <p className="py-6 text-center text-sm text-slate-500">Nenhum comentário. Use “Marcar área” para apontar um problema.</p>
   const STATUS = { open: ['aberto', 'failed'], processing: ['corrigindo', 'queued'], resolved: ['resolvido', 'done'], discarded: ['descartado', 'pending'] } as const
+  const canRemove = (c: ReviewComment) => can('comment_area') && c.status !== 'processing' && (c.createdBy === me?.id || me?.role === 'system_admin' || me?.role === 'scan_admin')
+  const remove = async (c: ReviewComment, n: number) => {
+    const ok = await ask({ title: `Remover comentário #${n}`, message: <p>“{c.comment}” some da página e da lista. Isso não pode ser desfeito.</p>, confirmLabel: 'Remover', danger: true })
+    if (ok) await run(() => reviewApi.removeComment(c.id), 'Comentário removido.')
+  }
   return (
+    <>
+    {confirmDialog}
     <ol className="max-h-[65vh] space-y-2 overflow-y-auto">
       {page.comments.map((c, i) => (
         <li key={c.id} className="rounded-lg border border-slate-200 p-2.5 text-sm dark:border-slate-800">
@@ -699,11 +707,17 @@ function CommentsPanel({ page, busy, run }: { page: Page; busy: boolean; run: (f
               ) : (
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(() => reviewApi.setComment(c.id, 'open'), 'Comentário reaberto.')}>Reabrir</Button>
               )}
+              {canRemove(c) && (
+                <Button size="sm" variant="ghost" className="ml-auto text-failed" disabled={busy} onClick={() => remove(c, page.comments.length - i)}>
+                  Remover
+                </Button>
+              )}
             </div>
           )}
         </li>
       ))}
     </ol>
+    </>
   )
 }
 

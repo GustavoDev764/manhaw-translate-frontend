@@ -33,6 +33,7 @@ export interface ReviewComment {
   status: CommentStatus
   workflowId: number | null
   resultVersionId: string | null
+  createdBy: string | null
   by: string
   at: string
   resolvedBy: string | null
@@ -132,6 +133,7 @@ export const reviewApi = {
   page: (id: string) => request<ReviewPage>(`/review/pages/${id}`),
   comment: (pageId: string, input: { region: Rect; comment: string; action: CommentAction }) => post<{ id: string; workflowId?: number }>(`/review/pages/${pageId}/comments`, input),
   setComment: (id: string, status: 'open' | 'resolved' | 'discarded') => patch<{ ok: true }>(`/review/comments/${id}`, { status }),
+  removeComment: (id: string) => del<{ ok: true }>(`/review/comments/${id}`),
   addLayer: (pageId: string, input: LayerInput) => post<{ id: string }>(`/review/pages/${pageId}/layers`, input),
   updateLayer: (id: string, input: LayerInput) => patch<{ ok: true; twins?: { pageId: string; position: number }[] }>(`/review/layers/${id}`, input),
   removeLayer: (id: string) => del<{ ok: true }>(`/review/layers/${id}`),
