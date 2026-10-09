@@ -6,7 +6,7 @@ import { ago, chaptersLabel, num, approxUsd, when } from '../lib/format'
 import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
 import { WF_STATUS } from '../lib/workflowStatus'
-import { workflowsApi, type ItemError, type ItemStatus, type WorkflowType } from '../workflowsApi'
+import { workflowsApi, type AnthropicBatch, type BatchLots, type ItemBatch, type ItemError, type ItemStatus, type Phase, type WorkflowType } from '../workflowsApi'
 
 const ITEM_STATUS: Record<ItemStatus, { label: string; tone: Tone }> = {
   pending: { label: 'Aguardando', tone: 'pending' },
@@ -17,9 +17,73 @@ const ITEM_STATUS: Record<ItemStatus, { label: string; tone: Tone }> = {
   skipped: { label: 'Ignorado', tone: 'neutral' },
   canceled: { label: 'Cancelado', tone: 'pending' },
   waiting_key: { label: 'Pausado: sem API key', tone: 'failed' },
+  waiting_api: { label: 'Na fila da Anthropic', tone: 'queued' },
 }
 
-type Filter = 'active' | 'all' | 'failed' | 'mine'
+const PHASE_LABEL: Record<Phase, string> = {
+  preparing: 'Copiando as páginas originais',
+  glossary: 'Preparando o glossário',
+  submitting: 'Enviando para a fila da Anthropic',
+  waiting_api: 'Aguardando a Anthropic',
+  collecting: 'Baixando as respostas e desenhando as imagens',
+  glossary_update: 'Atualizando o glossário',
+  saving: 'Salvando as páginas traduzidas',
+}
+
+const BATCH_STATUS: Record<AnthropicBatch['status'], string> = {
+  in_progress: 'Em processamento',
+  canceling: 'Cancelando',
+  ended: 'Finalizado',
+}
+
+type Filter = 'active' | 'anthropic' | 'all' | 'failed' | 'mine'
+
+function lotsText(l: BatchLots) {
+  return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} na Anthropic` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
+}
+
+export function PhaseLine({ phase, phaseAt, lots, prefix }: { phase: Phase; phaseAt: string | null; lots?: BatchLots | null; prefix?: string }) {
+  return (
+    <span className="mt-1 block text-xs font-medium text-queued" data-testid="item-phase">
+      {prefix ? `${prefix} · ` : ''}
+      {PHASE_LABEL[phase] ?? phase}
+      {phaseAt ? ` · ${ago(phaseAt)}` : ''}
+      {lots && lots.total > 0 ? <span className="font-normal text-slate-500"> · {lotsText(lots)}</span> : null}
+    </span>
+  )
+}
+
+function BatchPanel({ batch }: { batch: ItemBatch }) {
+  return (
+    <span className="mt-2 block rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs dark:border-slate-800 dark:bg-slate-900/60">
+      <span className="block text-slate-600 dark:text-slate-300">
+        Enviado {ago(batch.submittedAt)} · {lotsText(batch.lots)}
+        {batch.checkedAt ? ` · consultado ${ago(batch.checkedAt)}` : ''}
+      </span>
+      {batch.batches.map((b) => {
+        const total = b.counts.processing + b.counts.succeeded + b.counts.errored + b.counts.canceled + b.counts.expired
+        const failed = b.counts.errored + b.counts.canceled + b.counts.expired
+        return (
+          <span key={b.id} className="mt-1 block text-slate-500">
+            <span className="font-mono text-[11px] text-slate-700 dark:text-slate-200">{b.id}</span>
+            {' · '}
+            {b.kind === 'read' ? 'leitura (OCR)' : 'tradução'}
+            {' · '}
+            <b className={b.status === 'ended' ? 'text-done' : 'text-queued'}>{BATCH_STATUS[b.status]}</b>
+            {' · '}
+            {num(b.counts.succeeded)} de {num(total)} pedidos prontos
+            {b.counts.processing ? `, ${num(b.counts.processing)} processando` : ''}
+            {failed ? `, ${num(failed)} com erro` : ''}
+            {' · criado '}
+            {ago(b.createdAt)}
+            {b.status !== 'ended' && b.expiresAt ? ` · expira ${when(b.expiresAt)}` : ''}
+            {b.error ? <span className="block text-failed">{b.error}</span> : null}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
 
 const PROGRESS_VERB: Partial<Record<WorkflowType, string>> = { scan: 'Escaneando página', render: 'Desenhando página', delete: 'Apagando arquivo', import: 'Importando página', export: 'Zipando capítulo' }
 
@@ -40,7 +104,7 @@ export function ProgressLine({ verb, done, total, prefix }: { verb: string; done
 
 export function WorkflowsPage({ openId }: { openId?: number }) {
   const [filter, setFilter] = useState<Filter>('active')
-  const query = filter === 'active' ? { status: 'active' } : filter === 'failed' ? { status: 'failed' } : filter === 'mine' ? { mine: true } : {}
+  const query = filter === 'active' ? { status: 'active' } : filter === 'anthropic' ? { status: 'anthropic' } : filter === 'failed' ? { status: 'failed' } : filter === 'mine' ? { mine: true } : {}
   const list = usePolling(() => workflowsApi.list({ ...query, take: 50 }), 0, [filter])
   const detail = usePolling(() => (openId ? workflowsApi.get(openId) : Promise.resolve(null)), 0, [openId])
   useWorkflowEvents((e) => {
@@ -59,6 +123,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
         onChange={setFilter}
         tabs={[
           { value: 'active', label: 'Em andamento' },
+          { value: 'anthropic', label: 'Na Anthropic' },
           { value: 'failed', label: 'Com falha' },
           { value: 'mine', label: 'Meus' },
           { value: 'all', label: 'Todos' },
@@ -70,7 +135,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
           <Spinner /> Carregando…
         </EmptyState>
       )}
-      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : 'Nenhum workflow.'}</EmptyState>}
+      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : filter === 'anthropic' ? 'Nada aguardando a Anthropic agora.' : 'Nenhum workflow.'}</EmptyState>}
       {list.data && list.data.rows.length > 0 && (
         <Card className="divide-y divide-slate-100 dark:divide-slate-800">
           {list.data.rows.map((w) => {
@@ -86,6 +151,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                     {w.series?.title} · {chaptersLabel(w.chapters)} · {num(w.pages)} pág.
                   </span>
                   {PROGRESS_VERB[w.type] && w.progress.map((p) => <ProgressLine key={p.label} verb={PROGRESS_VERB[w.type]!} done={p.done} total={p.total} prefix={p.label} />)}
+                  {w.steps.map((st) => st.phase && <PhaseLine key={st.label} phase={st.phase} phaseAt={st.phaseAt} lots={st.lots} prefix={st.label} />)}
                 </span>
                 <span className="w-32">
                   <span className="block h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -167,11 +233,18 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
                     {it.errorMessage && it.status !== 'failed' ? `falha na tentativa anterior: ${it.errorMessage}` : ''}
                   </span>
                   {it.status === 'running' && it.progress && detail && PROGRESS_VERB[detail.type] && <ProgressLine verb={PROGRESS_VERB[detail.type]!} done={it.progress.done} total={it.progress.total} />}
+                  {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} prefix={it.status === 'failed' ? 'Parou em' : undefined} />}
+                  {it.batch && it.batch.batches.length > 0 && ['waiting_api', 'running', 'queued'].includes(it.status) && <BatchPanel batch={it.batch} />}
                 </span>
                 <Badge tone={ITEM_STATUS[it.status].tone}>{ITEM_STATUS[it.status].label}</Badge>
                 {it.hasError && (
                   <Button size="sm" variant="ghost" onClick={async () => setErrorOf(await workflowsApi.error(it.id))}>
                     Ver detalhes do erro
+                  </Button>
+                )}
+                {it.status === 'waiting_api' && (
+                  <Button size="sm" disabled={busy === `c${it.id}`} onClick={() => act(`c${it.id}`, () => workflowsApi.checkBatch(it.id), `${it.label}: status atualizado com a Anthropic.`)}>
+                    Consultar na Anthropic
                   </Button>
                 )}
                 {['failed', 'canceled'].includes(it.status) && (

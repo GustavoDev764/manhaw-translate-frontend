@@ -10,7 +10,6 @@ import { useJobs } from './components/jobsContext'
 import { Badge, Spinner } from './components/ui'
 import { cx } from './lib/cx'
 import { href, useRoute } from './lib/hooks'
-import { ChapterPagesPage } from './pages/ChapterPagesPage'
 import { JobsPage } from './pages/JobsPage'
 import { ChapterStagesPage } from './pages/library/ChapterStagesPage'
 import { LibraryPage } from './pages/library/LibraryPage'
@@ -26,11 +25,7 @@ import { AdminKeysPage } from './pages/settings/AdminKeysPage'
 import { EmailPage } from './pages/settings/EmailPage'
 import { ScanApiKeyPage } from './pages/settings/ScanApiKeyPage'
 import { ProfilePage } from './pages/ProfilePage'
-import { QueuePage } from './pages/QueuePage'
-import { ReaderPage } from './pages/ReaderPage'
 import { MangaReaderPage } from './pages/reader/MangaReaderPage'
-import { SeriesListPage } from './pages/SeriesListPage'
-import { SeriesPage } from './pages/SeriesPage'
 import { AuditPage } from './pages/settings/AuditPage'
 import { DeletionsPage } from './pages/settings/DeletionsPage'
 import { FeaturesPage } from './pages/settings/FeaturesPage'
@@ -68,7 +63,7 @@ function Nav({ section }: { section: string }) {
           <Logo className="h-7" />
         </a>
         <nav className="flex flex-wrap gap-1">
-          {link(href(), 'Manhwas', section === '' || section === 's' || section === 'series')}
+          {link(href(), 'Manhwas', section === '' || section === 's')}
           {link(href('workflows'), 'Workflows', section === 'workflows')}
           {me?.role === 'system_admin' && running > 0 && link(
             href('jobs'),
@@ -121,7 +116,7 @@ const SETTINGS: Record<string, () => React.ReactNode> = {
 function Routes() {
   const { me } = useAuth()
   const route = useRoute()
-  const [section, slug, sub, chapter, focus] = route
+  const [section, slug, sub] = route
   const admin = me?.role === 'system_admin' || me?.role === 'scan_admin'
   if (section === 'ler' && slug && !me?.mustChangePassword) return <MangaReaderPage key={slug} slug={slug} chapterId={sub} />
   let page: React.ReactNode
@@ -134,17 +129,8 @@ function Routes() {
   else if (section === 's' && slug && sub) page = <ChapterStagesPage key={sub} slug={slug} chapterId={sub} />
   else if (section === 's' && slug) page = <SeriesStagesPage key={slug} slug={slug} />
   else if (section === 'workflows') page = <WorkflowsPage openId={slug ? Number(slug) : undefined} />
-  else if (['series', 'queue', 'jobs', 'legacy'].includes(section ?? '') && me?.role !== 'system_admin') page = <LibraryPage />
-  else if (section === 'series' && slug && sub === 'read' && chapter) {
-    page = <ReaderPage key={`${slug}/${chapter}/${focus ?? ''}`} slug={slug} chapter={chapter} focus={focus} />
-  } else if (section === 'series' && slug && sub === 'chapter' && chapter) {
-    page = <ChapterPagesPage key={`${slug}/${chapter}`} slug={slug} chapter={chapter} />
-  } else if (section === 'series' && slug) {
-    const tab = sub === 'download' || sub === 'queue' || sub === 'notes' ? sub : 'translate'
-    page = <SeriesPage key={slug} slug={slug} tab={tab} />
-  } else if (section === 'queue') page = <QueuePage />
+  else if (section === 'jobs' && me?.role !== 'system_admin') page = <LibraryPage />
   else if (section === 'jobs') page = <JobsPage />
-  else if (section === 'legacy') page = <SeriesListPage />
   else page = <LibraryPage />
 
   return (

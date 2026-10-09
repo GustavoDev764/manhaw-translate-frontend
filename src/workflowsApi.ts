@@ -3,7 +3,7 @@ import { del, patch, post, put, request } from './api'
 export type LaunchType = 'download' | 'scan' | 'translate' | 'cleanup' | 'render'
 export type WorkflowType = LaunchType | 'import' | 'fix_area' | 'edit_text' | 'delete' | 'export'
 export type WorkflowStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'partial' | 'canceled'
-export type ItemStatus = 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'canceled' | 'waiting_key'
+export type ItemStatus = 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'canceled' | 'waiting_key' | 'waiting_api'
 
 export const STAGE_LABEL: Record<WorkflowType, string> = {
   download: 'Baixar',
@@ -127,6 +127,7 @@ export interface WorkflowRow {
   items: number
   counts: Partial<Record<ItemStatus, number>>
   progress: { label: string; done: number; total: number }[]
+  steps: { label: string; phase: Phase | null; phaseAt: string | null; lots: BatchLots | null }[]
   pages: number
   costUsd: number
   title: string | null
@@ -151,13 +152,43 @@ export interface WorkflowItemRow {
   outputTokens: number
   costUsd: number
   progress: { done: number; total: number } | null
+  phase: Phase | null
+  phaseAt: string | null
+  batch: ItemBatch | null
   startedAt: string | null
   finishedAt: string | null
 }
 
-export interface WorkflowDetail extends Omit<WorkflowRow, 'scan' | 'items' | 'counts' | 'pages' | 'costUsd' | 'chapters' | 'progress'> {
+export interface WorkflowDetail extends Omit<WorkflowRow, 'scan' | 'items' | 'counts' | 'pages' | 'costUsd' | 'chapters' | 'progress' | 'steps'> {
   params: { chapters?: number[]; preset?: string | null; title?: string }
   items: WorkflowItemRow[]
+}
+
+export type Phase = 'preparing' | 'glossary' | 'submitting' | 'waiting_api' | 'collecting' | 'glossary_update' | 'saving'
+
+export interface BatchLots {
+  total: number
+  done: number
+  queued: number
+  error: number
+}
+
+export interface AnthropicBatch {
+  id: string
+  kind: 'read' | 'translate'
+  status: 'in_progress' | 'canceling' | 'ended'
+  counts: { processing: number; succeeded: number; errored: number; canceled: number; expired: number }
+  createdAt: string
+  endedAt?: string | null
+  expiresAt?: string | null
+  error?: string
+}
+
+export interface ItemBatch {
+  submittedAt: string
+  checkedAt?: string
+  lots: BatchLots
+  batches: AnthropicBatch[]
 }
 
 export interface ItemError {
@@ -263,6 +294,7 @@ export const workflowsApi = {
   error: (itemId: string) => request<ItemError>(`/workflows/items/${itemId}/error`),
   retry: (itemId: string) => post<{ ok: true }>(`/workflows/items/${itemId}/retry`),
   skip: (itemId: string) => post<{ ok: true }>(`/workflows/items/${itemId}/skip`),
+  checkBatch: (itemId: string) => post<{ status: ItemStatus; phase: Phase | null; phaseAt: string | null; batch: ItemBatch | null }>(`/workflows/items/${itemId}/check-batch`),
   processing: () => request<Processing>('/settings/processing'),
   setProcessing: (workerConcurrency: number) => put<{ workerConcurrency: number }>('/settings/processing', { workerConcurrency }),
   notifications: (unread = false) => request<AppNotification[]>(`/notifications${unread ? '?unread=1' : ''}`),

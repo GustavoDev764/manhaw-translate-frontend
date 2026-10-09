@@ -176,6 +176,11 @@ export function LaunchDialog({
             {num(plan.unpublished)} {plan.unpublished === 1 ? 'página tem' : 'páginas têm'} alterações nas caixas de texto que ainda não foram publicadas. Traduzir de novo substitui essas caixas pela tradução nova.
           </Notice>
         )}
+        {input.type === 'translate' && (
+          <Notice tone="neutral">
+            A tradução vai pela fila da Anthropic, que custa metade do preço. Costuma ficar pronta em minutos, mas pode levar até 24 horas. Acompanhe em Workflows › Na Anthropic.
+          </Notice>
+        )}
         {plan?.keyMissing && (
           <Notice tone="failed">A scan está sem API key: o workflow será criado, mas fica pausado até a chave ser configurada.</Notice>
         )}

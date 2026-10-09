@@ -1,7 +1,7 @@
 import { JOB_STATUS, useJobs } from '../components/jobsContext'
 import { Badge, Card, EmptyState, Spinner } from '../components/ui'
 import { ago, duration } from '../lib/format'
-import { href, useTick } from '../lib/hooks'
+import { useTick } from '../lib/hooks'
 
 export function JobsPage() {
   const { jobs, openJob } = useJobs()
@@ -32,13 +32,7 @@ export function JobsPage() {
                 {st.label}
               </Badge>
               <span className="min-w-0 flex-1 font-medium">{j.title}</span>
-              <a
-                href={href('series', j.series)}
-                onClick={(e) => e.stopPropagation()}
-                className="text-sm text-slate-500 hover:text-brand dark:text-slate-400"
-              >
-                {j.series}
-              </a>
+              <span className="text-sm text-slate-500 dark:text-slate-400">{j.series}</span>
               <span className="text-sm text-slate-500 tabular-nums dark:text-slate-400">
                 {duration(ms)} · {ago(j.startedAt)}
               </span>
