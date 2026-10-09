@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { authApi } from '../adminApi'
 import { emailApi } from '../keysApi'
 import { useAuth } from '../auth/authCtx'
+import { Logo } from '../components/Logo'
 import { PasswordField } from '../components/password'
 import { Button, Field, inputClass, Notice, Spinner } from '../components/ui'
 
@@ -35,10 +36,9 @@ export function LoginPage() {
   return (
     <div className="grid min-h-screen place-items-center px-4">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-7 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center gap-2.5">
-          <img src="/favicon.svg" alt="" className="size-8" />
-          <h1 className="text-xl font-semibold">Manhwa Translate</h1>
-        </div>
+        <h1>
+          <Logo className="h-9" />
+        </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">Entre com o e-mail e a senha que o administrador criou para você.</p>
         {offline && <Notice tone="failed">{offline}</Notice>}
         <Field label="E-mail">

@@ -3,6 +3,7 @@ import { ROLE_LABEL } from './adminApi'
 import { AuthProvider } from './auth/AuthContext'
 import { useAuth } from './auth/authCtx'
 import { EventsBridge } from './components/events'
+import { Logo } from './components/Logo'
 import { JobsProvider } from './components/jobs'
 import { UploadsProvider } from './components/uploads'
 import { useJobs } from './components/jobsContext'
@@ -63,9 +64,8 @@ function Nav({ section }: { section: string }) {
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-4 py-2.5">
-        <a href={href()} className="mr-4 flex items-center gap-2 font-semibold">
-          <img src="/favicon.svg" alt="" className="size-6" />
-          Manhwa Translate
+        <a href={href()} className="mr-4 flex items-center">
+          <Logo className="h-7" />
         </a>
         <nav className="flex flex-wrap gap-1">
           {link(href(), 'Manhwas', section === '' || section === 's' || section === 'series')}

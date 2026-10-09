@@ -76,7 +76,7 @@ function SmtpTab() {
           <PasswordField id="smtp-pass" value={f.password} onChange={(v) => set({ password: v })} autoComplete="off" />
         </div>
         <div className="sm:col-span-2">
-          <Field label="Remetente"><input className={inputClass} value={f.from} onChange={(e) => set({ from: e.target.value })} placeholder="Manhwa Translate <nao-responda@seudominio.com>" /></Field>
+          <Field label="Remetente"><input className={inputClass} value={f.from} onChange={(e) => set({ from: e.target.value })} placeholder="ManhwaLab <nao-responda@seudominio.com>" /></Field>
         </div>
         <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
           <Field label="Enviar teste para"><input className={inputClass} type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="seu e-mail" /></Field>
