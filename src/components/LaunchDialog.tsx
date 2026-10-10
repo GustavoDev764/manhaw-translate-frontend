@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ApiError } from '../api'
 import { num } from '../lib/format'
-import { href } from '../lib/hooks'
-import { STAGE_HELP, STAGE_LABEL, workflowsApi, type LaunchInput, type LaunchType, type Plan } from '../workflowsApi'
+import { STAGE_HELP, STAGE_LABEL, workflowsApi, type ExcludeReason, type LaunchInput, type LaunchType, type Plan, type PlanChapter } from '../workflowsApi'
 import { useJobs } from './jobsContext'
 import { Button, Dialog, Notice, Spinner } from './ui'
 
@@ -13,6 +12,18 @@ function Tile({ label, value, tone }: { label: string; value: number; tone?: 'br
       <div className="text-xs text-slate-500">{label}</div>
     </div>
   )
+}
+
+const REASON_TEXT: Record<Exclude<ExcludeReason, 'busy'>, string> = {
+  not_scanned: 'precisa escanear antes',
+  no_pages: 'importe ou baixe as páginas',
+  no_layers: 'traduza antes (sem caixas de texto)',
+}
+
+function caps(list: PlanChapter[]) {
+  const names = list.map((c) => c.number)
+  if (names.length === 1) return `Cap. ${names[0]}`
+  return `Caps. ${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}`
 }
 
 const DONE_WORD: Record<LaunchType, string> = {
@@ -28,12 +39,14 @@ export function LaunchDialog({
   onClose,
   onCreated,
 }: {
-  input: Omit<LaunchInput, 'force'> | null
+  input: Omit<LaunchInput, 'force' | 'includeDrafts' | 'confirmApproved'> | null
   onClose: () => void
   onCreated?: (id: number) => void
 }) {
   const { toast } = useJobs()
   const [force, setForce] = useState(false)
+  const [includeDrafts, setIncludeDrafts] = useState(false)
+  const [confirmApproved, setConfirmApproved] = useState(false)
   const [plan, setPlan] = useState<Plan | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -42,7 +55,7 @@ export function LaunchDialog({
     if (!input) return
     let alive = true
     workflowsApi
-      .plan({ ...input, force })
+      .plan({ ...input, force, includeDrafts })
       .then((p) => {
         if (!alive) return
         setPlan(p)
@@ -52,11 +65,13 @@ export function LaunchDialog({
     return () => {
       alive = false
     }
-  }, [input, force])
+  }, [input, force, includeDrafts])
 
   const close = () => {
     setPlan(null)
     setForce(false)
+    setIncludeDrafts(false)
+    setConfirmApproved(false)
     setError(null)
     onClose()
   }
@@ -65,8 +80,9 @@ export function LaunchDialog({
     if (!input) return
     setBusy(true)
     try {
-      const r = await workflowsApi.create({ ...input, force })
-      toast('done', `Workflow #${r.id} criado: ${STAGE_LABEL[input.type]} · ${num(r.totals.willRun)} ${input.type === 'download' ? 'capítulos' : 'páginas'}`)
+      const r = await workflowsApi.create({ ...input, force, includeDrafts, confirmApproved })
+      const out = r.excluded?.length ? ` · ${r.excluded.length} ${r.excluded.length === 1 ? 'capítulo ficou' : 'capítulos ficaram'} de fora` : ''
+      toast('done', `Workflow #${r.id} criado: ${STAGE_LABEL[input.type]} · ${num(r.totals.willRun)} ${input.type === 'download' ? 'capítulos' : 'páginas'}${out}`)
       onCreated?.(r.id)
       close()
     } catch (err) {
@@ -79,7 +95,13 @@ export function LaunchDialog({
   if (!input) return null
   const t = plan?.totals
   const unit = input.type === 'download' ? 'capítulos' : 'páginas'
-  const lockedChapters = plan?.chapters.filter((c) => c.chapterLocked) ?? []
+  const busyChapters = plan?.chapters.filter((c) => c.busy) ?? []
+  const allBusy = !!plan && busyChapters.length === plan.chapters.length
+  const busyGroups = [...new Map(busyChapters.map((c) => [c.busy!.workflowId, { label: c.busy!.label, list: busyChapters.filter((x) => x.busy!.workflowId === c.busy!.workflowId) }])).values()]
+  const reasonGroups = (['not_scanned', 'no_pages', 'no_layers'] as const).map((r) => ({ reason: r, list: plan?.chapters.filter((c) => c.reason === r) ?? [] })).filter((g) => g.list.length)
+  const approved = t?.approved ?? 0
+  const drafts = t?.drafts ?? 0
+  const needsConfirm = approved > 0 && !confirmApproved
   const done = DONE_WORD[input.type]
   const scanWidened = input.type === 'scan' && !!input.pageIds?.length && !!t && t.willRun > t.selected
   const widenedChapters = plan?.chapters.filter((c) => c.willRun > 0).map((c) => `Cap. ${c.number}`).join(', ') ?? ''
@@ -92,7 +114,7 @@ export function LaunchDialog({
       footer={
         <>
           <Button onClick={close}>Fechar</Button>
-          <Button variant="primary" onClick={start} disabled={busy || !t || t.willRun === 0 || lockedChapters.length > 0}>
+          <Button variant="primary" onClick={start} disabled={busy || !t || t.willRun === 0 || needsConfirm}>
             {busy ? <Spinner /> : t ? `Iniciar · ${num(t.willRun)} ${unit}` : 'Iniciar'}
           </Button>
         </>
@@ -107,8 +129,8 @@ export function LaunchDialog({
               {plan.chapters.map((c) => (
                 <span
                   key={c.number}
-                  title={c.chapterLocked ? 'Tem páginas em outro processo' : `${c.willRun} de ${c.selected}`}
-                  className={`rounded-full border px-2.5 py-0.5 text-xs ${c.chapterLocked ? 'border-failed/60 text-failed' : c.willRun ? 'border-brand/50 bg-brand/10 text-brand' : 'border-slate-300 text-slate-500 dark:border-slate-700'}`}
+                  title={c.busy ? `Em ${c.busy.label}: fica de fora` : c.reason && c.reason !== 'busy' ? `Fica de fora: ${REASON_TEXT[c.reason]}` : `${c.willRun} de ${c.selected}`}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs ${c.busy ? 'border-failed/60 text-failed line-through' : c.willRun ? 'border-brand/50 bg-brand/10 text-brand' : 'border-slate-300 text-slate-500 dark:border-slate-700'}`}
                 >
                   Cap. {c.number}
                   {input.type !== 'download' && input.pageIds?.length ? ` · ${c.selected} pág.` : ''}
@@ -161,20 +183,43 @@ export function LaunchDialog({
             {num(t.missing)} {unit} ainda não {t.missing === 1 ? 'está' : 'estão'} {plan?.needs} e {t.missing === 1 ? 'ficará' : 'ficarão'} de fora.
           </Notice>
         )}
-        {t && t.locked > 0 && !lockedChapters.length && <Notice tone="queued">{num(t.locked)} {unit} em outro processo ficarão de fora.</Notice>}
-        {lockedChapters.length > 0 && (
-          <Notice tone="failed">
-            {lockedChapters.map((c) => `Cap. ${c.number}`).join(', ')} {lockedChapters.length === 1 ? 'tem' : 'têm'} páginas em outro processo. Abra o capítulo e use{' '}
-            <a className="underline" href={href('s', plan!.series.slug, lockedChapters[0].chapterId ?? '')}>
-              Selecionar páginas livres
-            </a>
-            .
+        {busyGroups.length > 0 && (
+          <Notice tone={allBusy ? 'failed' : 'queued'}>
+            {allBusy ? 'Todos os capítulos escolhidos estão em outro processo: ' : ''}
+            {busyGroups.map((g, i) => (
+              <span key={g.label}>
+                {i > 0 ? '; ' : ''}
+                {caps(g.list)} {g.list.length === 1 ? 'está' : 'estão'} em <b>{g.label}</b>
+              </span>
+            ))}
+            {allBusy ? '.' : ` e ${busyChapters.length === 1 ? 'fica' : 'ficam'} de fora. Os outros seguem.`}
           </Notice>
         )}
-        {input.type === 'translate' && !!plan?.unpublished && (
-          <Notice tone="queued">
-            {num(plan.unpublished)} {plan.unpublished === 1 ? 'página tem' : 'páginas têm'} alterações nas caixas de texto que ainda não foram publicadas. Traduzir de novo substitui essas caixas pela tradução nova.
+        {reasonGroups.map((g) => (
+          <Notice key={g.reason} tone="queued">
+            {caps(g.list)} {g.list.length === 1 ? 'fica' : 'ficam'} de fora: {REASON_TEXT[g.reason]}.
           </Notice>
+        ))}
+        {t && t.locked > 0 && !busyChapters.length && <Notice tone="queued">{num(t.locked)} {unit} em outro processo ficarão de fora.</Notice>}
+        {input.type === 'translate' && drafts > 0 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-queued/50 bg-queued/5 p-3 text-sm">
+            <input type="checkbox" className="mt-0.5 accent-brand" checked={includeDrafts} onChange={(e) => setIncludeDrafts(e.target.checked)} data-testid="include-drafts" />
+            <span>
+              <b>Incluir e descartar os rascunhos</b>
+              <span className="block text-xs text-slate-500">
+                {num(drafts)} {drafts === 1 ? 'página tem' : 'páginas têm'} alterações nas caixas de texto que ainda não foram publicadas. {includeDrafts ? 'Elas serão traduzidas de novo e as alterações serão substituídas.' : 'Por padrão elas ficam de fora para não perder essas alterações.'}
+              </span>
+            </span>
+          </label>
+        )}
+        {approved > 0 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-failed/50 bg-failed/5 p-3 text-sm">
+            <input type="checkbox" className="mt-0.5 accent-brand" checked={confirmApproved} onChange={(e) => setConfirmApproved(e.target.checked)} data-testid="confirm-approved" />
+            <span>
+              <b>Vai desfazer a aprovação de {num(approved)} {approved === 1 ? 'página' : 'páginas'}</b>
+              <span className="block text-xs text-slate-500">Essas páginas já foram aprovadas na revisão. Marque para confirmar que elas precisam ser revisadas de novo.</span>
+            </span>
+          </label>
         )}
         {input.type === 'translate' && (
           <Notice tone="neutral">

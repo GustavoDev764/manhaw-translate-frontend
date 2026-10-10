@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react'
+import { useAuth } from '../../auth/authCtx'
 import { AlertTriangle } from '../../components/AlertTriangle'
+import { useConfirm } from '../../components/confirm'
+import { CheckIcon, PencilIcon } from '../../components/icons'
+import { useJobs } from '../../components/jobsContext'
 import { FileLinks } from '../../components/FileLinks'
 import { assetViewUrl } from '../../lib/assets'
 import { LaunchDialog } from '../../components/LaunchDialog'
@@ -8,7 +12,7 @@ import { Badge, Button, Card, EmptyState, Notice, Spinner } from '../../componen
 import { cx } from '../../lib/cx'
 import { num, when } from '../../lib/format'
 import { href, usePolling } from '../../lib/hooks'
-import { libraryApi, STAGE_LABEL, type LaunchInput, type LibraryPage } from '../../workflowsApi'
+import { libraryApi, STAGE_LABEL, workflowsApi, type LaunchInput, type LibraryPage } from '../../workflowsApi'
 
 const STAGE_DOTS: { key: keyof LibraryPage['stages']; label: string }[] = [
   { key: 'scanned', label: 'Escaneada' },
@@ -70,15 +74,63 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
   const series = usePolling(() => libraryApi.seriesDetail(slug), 0, [slug])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [launch, setLaunch] = useState<Omit<LaunchInput, 'force'> | null>(null)
+  const busyInfo = usePolling(() => workflowsApi.chapterBusy(chapterId), 5000, [chapterId])
+  const { me } = useAuth()
+  const { toast } = useJobs()
+  const [ask, confirmDialog] = useConfirm()
+  const [releasing, setReleasing] = useState(false)
+  const canRelease = me?.role === 'system_admin' || me?.role === 'scan_admin'
+  const chapterBusy = busyInfo.data?.busy ?? null
+
+  const publish = async () => {
+    if (!toPublish.length) return
+    setPublishing(true)
+    try {
+      const r = await workflowsApi.publishPages(toPublish.map((p) => p.id))
+      const out = r.excluded.busyPages + r.excluded.locked + r.excluded.editing
+      toast('done', `Workflow #${r.id} criado: publicando ${r.items} ${r.items === 1 ? 'página' : 'páginas'} na fila leve${out ? ` · ${out} ficaram de fora` : ''}.`)
+      setSelected(new Set())
+      await reload()
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const release = async () => {
+    if (!chapterBusy) return
+    const ok = await ask({
+      title: 'Liberar capítulo',
+      message: `Cancela tudo o que está em andamento neste capítulo (${chapterBusy.label} e correções de página) e solta as travas. Use só se o processo travou.`,
+      confirmLabel: 'Liberar capítulo',
+      danger: true,
+    })
+    if (!ok) return
+    setReleasing(true)
+    try {
+      const r = await workflowsApi.releaseChapter(chapterId)
+      toast('done', `Capítulo liberado: ${r.released} ${r.released === 1 ? 'item cancelado' : 'itens cancelados'}.`)
+      await Promise.all([busyInfo.reload(), reload()])
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setReleasing(false)
+    }
+  }
   const [onlyFree, setOnlyFree] = useState(false)
   const [onlyReported, setOnlyReported] = useState(false)
+  const [onlyUnpublished, setOnlyUnpublished] = useState(false)
+  const [publishing, setPublishing] = useState(false)
 
   const pages = useMemo(() => data?.pages ?? [], [data])
   const free = pages.filter((p) => !p.lock)
   const locked = pages.length - free.length
   const chosen = pages.filter((p) => selected.has(p.id))
   const reported = pages.filter((p) => p.reported).length
-  const shown = (onlyFree ? free : pages).filter((p) => !onlyReported || p.reported)
+  const unpublishedPages = pages.filter((p) => p.unpublished)
+  const shown = (onlyFree ? free : pages).filter((p) => (!onlyReported || p.reported) && (!onlyUnpublished || p.unpublished))
+  const toPublish = (chosen.length ? chosen : unpublishedPages).filter((p) => p.unpublished && !p.lock)
   const toggle = (id: string) =>
     setSelected((s) => {
       const n = new Set(s)
@@ -112,6 +164,26 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
         </p>
       </div>
 
+      {chapterBusy && (
+        <Notice tone="queued">
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              O capítulo está em{' '}
+              <a className="font-semibold underline" href={href('workflows', String(chapterBusy.workflowId))}>
+                {chapterBusy.label}
+              </a>
+              . Outros workflows deixam este capítulo de fora até terminar, e as alterações de texto ficam salvas sem publicar.
+            </span>
+            {canRelease && (
+              <Button size="sm" variant="ghost" className="text-failed" onClick={release} disabled={releasing}>
+                {releasing ? <Spinner /> : 'Liberar capítulo'}
+              </Button>
+            )}
+          </span>
+        </Notice>
+      )}
+      {confirmDialog}
+
       <Card className="sticky top-14 z-10 flex flex-wrap items-center justify-between gap-2 p-3">
         <StageActions
           count={chosen.length}
@@ -123,6 +195,29 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
           <Button size="sm" variant={locked ? 'primary' : 'ghost'} onClick={() => setSelected(new Set(free.map((p) => p.id)))} disabled={!free.length}>
             Selecionar páginas livres ({free.length})
           </Button>
+          {(unpublishedPages.length > 0 || onlyUnpublished) && (
+            <Button size="sm" variant={onlyUnpublished ? 'primary' : 'ghost'} onClick={() => setOnlyUnpublished((v) => !v)} title="Mostra só as páginas com alterações nas caixas de texto que ainda não viraram versão">
+              <PencilIcon className="mr-1 size-3.5" />
+              {onlyUnpublished ? 'Mostrar todas' : `Só não publicadas (${unpublishedPages.length})`}
+            </Button>
+          )}
+          {unpublishedPages.length > 0 && (
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(unpublishedPages.filter((p) => !p.lock).map((p) => p.id)))}>
+              Selecionar não publicadas
+            </Button>
+          )}
+          {toPublish.length > 0 && (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={publish}
+              disabled={publishing || !!chapterBusy}
+              title={chapterBusy ? `O capítulo está em ${chapterBusy.label}: as alterações ficam salvas e podem ser publicadas quando terminar.` : 'Gera a imagem nova de cada página com as caixas de texto atuais'}
+              data-testid="publish-pages"
+            >
+              {publishing ? <Spinner /> : `Publicar alterações (${toPublish.length})`}
+            </Button>
+          )}
           {(reported > 0 || onlyReported) && (
             <Button size="sm" variant={onlyReported ? 'primary' : 'ghost'} onClick={() => setOnlyReported((v) => !v)} title="Mostra só as páginas que alguém relatou para revisão">
               <AlertTriangle className="mr-1 size-3.5" />
@@ -184,7 +279,20 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
                   <AlertTriangle className="size-3.5" />
                 </span>
               )}
-              {p.unpublished && <span className="pointer-events-none absolute left-1.5 top-7 rounded bg-queued px-1.5 text-[10px] font-medium text-white" title="Há alterações nas caixas de texto que ainda não viraram versão">não publicada</span>}
+              {(p.unpublished || p.stages.approved) && (
+                <span className="absolute left-1.5 top-7 flex gap-1">
+                  {p.stages.approved && (
+                    <span className="grid size-6 place-items-center rounded-full bg-done text-white shadow" title="Página aprovada" aria-label="Aprovada">
+                      <CheckIcon className="size-3.5" />
+                    </span>
+                  )}
+                  {p.unpublished && (
+                    <span className="grid size-6 place-items-center rounded-full bg-amber-500 text-white shadow" title="Alterações não publicadas: há mudanças nas caixas de texto que ainda não viraram versão" aria-label="Alterações não publicadas">
+                      <PencilIcon className="size-3.5" />
+                    </span>
+                  )}
+                </span>
+              )}
               {p.lock && (
                 <span className="pointer-events-none absolute inset-x-1.5 bottom-9">
                   <Badge tone="queued">

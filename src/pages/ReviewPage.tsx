@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/confirm'
 import { AlertTriangle } from '../components/AlertTriangle'
 import { FileLinks } from '../components/FileLinks'
+import { CheckIcon } from '../components/icons'
 import { assetViewUrl } from '../lib/assets'
 import { DISABLED_REASON, useAuth } from '../auth/authCtx'
 import { useJobs } from '../components/jobsContext'
@@ -80,6 +81,7 @@ function usePref(key: string, fallback: boolean): [boolean, (v: boolean) => void
 export function ReviewPage({ pageId }: { pageId: string }) {
   const { can } = useAuth()
   const { toast } = useJobs()
+  const [askApproval, approvalDialog] = useConfirm()
   const { data: page, error, reload } = usePolling(() => reviewApi.page(pageId), 0, [pageId])
   const fonts = usePolling(reviewApi.fonts, 0, [])
   const [mode, setMode] = useState<Mode>('view')
@@ -223,17 +225,41 @@ export function ReviewPage({ pageId }: { pageId: string }) {
           <a href={page.nextId ? href('r', page.nextId) : undefined} aria-disabled={!page.nextId}>
             <Button size="sm" disabled={!page.nextId} title="Próxima página (→)">Próxima →</Button>
           </a>
-          {page.approved ? (
+          {page.approved && !page.unpublished && (
+            <button
+              type="button"
+              data-testid="approved-button"
+              disabled={busy || !can('approve')}
+              title={`Aprovada por ${page.approved.by} em ${when(page.approved.at)}${can('approve') ? '. Clique para desfazer.' : ''}`}
+              onClick={async () => {
+                const ok = await askApproval({ title: 'Desfazer aprovação', message: `A página foi aprovada por ${page.approved!.by} em ${when(page.approved!.at)}. Desfazer a aprovação?`, confirmLabel: 'Desfazer aprovação', danger: true })
+                if (ok) await run(() => reviewApi.approve(page.id, false), 'Aprovação desfeita.')
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-done px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckIcon className="size-3.5" /> Aprovada
+            </button>
+          )}
+          {page.approved && page.unpublished && (
             <span className="flex items-center gap-2 text-sm">
-              <Badge tone="done">Aprovada por {page.approved.by}</Badge>
-              {can('approve') && <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(() => reviewApi.approve(page.id, false), 'Aprovação desfeita.')}>Desfazer</Button>}
+              <span className="inline-flex items-center gap-1 text-done" title={`Aprovada por ${page.approved.by} em ${when(page.approved.at)}`}>
+                <CheckIcon className="size-3.5" /> aprovada
+              </span>
+              <Button size="sm" variant="primary" disabled={busy || !can('approve')} title={can('approve') ? '' : DISABLED_REASON} onClick={() => run(() => reviewApi.approve(page.id, true), 'Página aprovada.')}>
+                Aprovar agora
+              </Button>
             </span>
-          ) : (
+          )}
+          {!page.approved && (
             <Button size="sm" variant="primary" disabled={busy || !can('approve')} title={can('approve') ? '' : DISABLED_REASON} onClick={() => run(() => reviewApi.approve(page.id, true), 'Página aprovada.')}>
               Aprovar página
             </Button>
           )}
         </div>
+        {page.approved && page.unpublished && (
+          <p className="order-last w-full text-xs text-amber-700 dark:text-amber-400">Há alterações não publicadas nas caixas de texto. Ao publicar, a aprovação é desfeita (ela vale para a imagem publicada).</p>
+        )}
+        {approvalDialog}
       </div>
 
       {locked && (

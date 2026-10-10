@@ -11,6 +11,7 @@ import { ago, num } from '../../lib/format'
 import { useWorkflowEvents } from '../../lib/workflowEvents'
 import { href, navigate, usePolling } from '../../lib/hooks'
 import { AlertTriangle } from '../../components/AlertTriangle'
+import { CheckIcon, PencilIcon } from '../../components/icons'
 import { DownloadsDrawer, OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
 import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter, type PackageInclude } from '../../workflowsApi'
 
@@ -39,6 +40,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const [exporting, setExporting] = useState(false)
   const [packaging, setPackaging] = useState(false)
   const [ranging, setRanging] = useState(false)
+  const [approval, setApproval] = useState<'all' | 'approved' | 'pending'>('all')
   const { uploads, add: addUploads, dismiss } = useUploads()
   const zipInput = useRef<HTMLInputElement>(null)
   const seriesId = data?.id
@@ -63,7 +65,11 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
     if (extracting) void reload()
   })
 
-  const chapters = useMemo(() => data?.chapters ?? [], [data])
+  const allChapters = useMemo(() => data?.chapters ?? [], [data])
+  const isApproved = (c: LibraryChapter) => c.pages - c.noText > 0 && (c.approvedText ?? 0) >= c.pages - c.noText
+  const approvedCount = allChapters.filter(isApproved).length
+  const pendingCount = allChapters.filter((c) => c.pages - c.noText > 0 && !isApproved(c)).length
+  const chapters = approval === 'all' ? allChapters : allChapters.filter((c) => (approval === 'approved' ? isApproved(c) : c.pages - c.noText > 0 && !isApproved(c)))
   const free = chapters.filter((c) => !c.locked && c.pages > 0)
   const chosen = chapters.filter((c) => selected.has(c.id))
   const exportable = chosen.filter((c) => c.pages > 0)
@@ -188,11 +194,22 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
               Limpar seleção
             </Button>
           )}
+          {(approvedCount > 0 || approval !== 'all') && (
+            <Button size="sm" variant={approval === 'approved' ? 'primary' : 'ghost'} onClick={() => setApproval((v) => (v === 'approved' ? 'all' : 'approved'))} data-testid="filter-approved">
+              <CheckIcon className="mr-1 size-3.5" />
+              {approval === 'approved' ? 'Mostrar todos' : `Só aprovados (${approvedCount})`}
+            </Button>
+          )}
+          {(pendingCount > 0 || approval !== 'all') && (
+            <Button size="sm" variant={approval === 'pending' ? 'primary' : 'ghost'} onClick={() => setApproval((v) => (v === 'pending' ? 'all' : 'pending'))}>
+              {approval === 'pending' ? 'Mostrar todos' : `Só pendentes de aprovação (${pendingCount})`}
+            </Button>
+          )}
         </div>
       </Card>
 
-      {!chapters.length && !mine.length && <EmptyState>Nenhum capítulo ainda. Use “Importar capítulos” para enviar os .zip (1.zip, 2.zip…){SITE_DOWNLOAD_ENABLED && data.sourceUrl ? ' ou “Baixar capítulos”' : ''}.</EmptyState>}
-      {(chapters.length > 0 || mine.length > 0) && (
+      {!allChapters.length && !mine.length && <EmptyState>Nenhum capítulo ainda. Use “Importar capítulos” para enviar os .zip (1.zip, 2.zip…){SITE_DOWNLOAD_ENABLED && data.sourceUrl ? ' ou “Baixar capítulos”' : ''}.</EmptyState>}
+      {(allChapters.length > 0 || mine.length > 0) && (
         <Card className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
@@ -204,12 +221,13 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
                 <th className="p-3">Traduzidas</th>
                 <th className="p-3">Limpas</th>
                 <th className="p-3">Desenhadas</th>
+                <th className="p-3">Aprovação</th>
                 <th className="p-3" />
               </tr>
             </thead>
             <tbody>
               {mine
-                .filter((u) => !chapters.some((c) => c.number === u.number))
+                .filter((u) => !allChapters.some((c) => c.number === u.number))
                 .map((u) => (
                   <UploadRow key={u.id} u={u} onDismiss={() => dismiss(u.id)} />
                 ))}
@@ -308,10 +326,10 @@ function ChapterRow({ c, slug, checked, onToggle, upload, onDismiss }: { c: Libr
           type="checkbox"
           className="accent-brand"
           checked={checked}
-          disabled={blocked || !c.pages}
+          disabled={!c.pages}
           onChange={onToggle}
           aria-label={`Selecionar capítulo ${c.number}`}
-          title={blocked ? 'Tem páginas em outro processo: abra o capítulo para escolher as livres' : ''}
+          title={c.busy ? `Em ${c.busy.label}: fica de fora dos workflows até terminar` : blocked ? 'Tem páginas em outro processo' : ''}
         />
       </td>
       <td className="p-3 font-medium">
@@ -321,6 +339,11 @@ function ChapterRow({ c, slug, checked, onToggle, upload, onDismiss }: { c: Libr
         {c.reported > 0 && (
           <a href={href('s', slug, c.id)} className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-medium text-amber-600 dark:text-amber-400" title={`${c.reported} ${c.reported === 1 ? 'página com revisão relatada' : 'páginas com revisão relatada'}`}>
             <AlertTriangle className="size-3.5" /> {c.reported}
+          </a>
+        )}
+        {(c.unpublished ?? 0) > 0 && (
+          <a href={href('s', slug, c.id)} className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-medium text-amber-600 dark:text-amber-400" title={`${c.unpublished} ${c.unpublished === 1 ? 'página com alteração não publicada' : 'páginas com alteração não publicada'}`} data-testid="chapter-unpublished">
+            <PencilIcon className="size-3.5" /> {c.unpublished}
           </a>
         )}
         {upload && <UploadStatus u={upload} onDismiss={() => onDismiss(upload.id)} />}
@@ -334,7 +357,11 @@ function ChapterRow({ c, slug, checked, onToggle, upload, onDismiss }: { c: Libr
             Importação falhou{c.import.message ? `: ${c.import.message}` : ''} · envie o .zip de novo
           </a>
         )}
-        {blocked && c.lock && (
+        {c.busy ? (
+          <a href={href('workflows', String(c.busy.workflowId))} className="ml-2">
+            <Badge tone="queued">{c.busy.label}</Badge>
+          </a>
+        ) : blocked && c.lock && (
           <a href={href('workflows', String(c.lock.workflowId))} className="ml-2">
             <Badge tone="queued">
               {STAGE_LABEL[c.lock.stage]} #{c.lock.workflowId} · {c.locked} pág.
@@ -350,6 +377,22 @@ function ChapterRow({ c, slug, checked, onToggle, upload, onDismiss }: { c: Libr
       <td className="p-3"><Progress value={c.translated} total={withText} color="bg-done" /></td>
       <td className="p-3"><Progress value={c.cleaned} total={withText} color="bg-slate-400" /></td>
       <td className="p-3"><Progress value={c.rendered} total={withText} color="bg-done" /></td>
+      <td className="p-3">
+        {withText > 0 && (c.approvedText ?? 0) >= withText ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-done px-2 py-0.5 text-xs font-medium text-white" data-testid="chapter-approved">
+            <CheckIcon className="size-3" /> Aprovado
+          </span>
+        ) : (c.approvedText ?? 0) > 0 ? (
+          <span className="block min-w-24">
+            <span className="block h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              <span className="block h-full bg-done" style={{ width: `${Math.round(((c.approvedText ?? 0) / withText) * 100)}%` }} />
+            </span>
+            <span className="text-[11px] tabular-nums text-slate-500">{num(c.approvedText ?? 0)} de {num(withText)} aprovadas</span>
+          </span>
+        ) : (
+          <span className="text-slate-400">—</span>
+        )}
+      </td>
       <td className="p-3 text-right">
         <a href={href('s', slug, c.id)} className="text-xs text-brand hover:underline">
           Abrir

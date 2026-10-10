@@ -51,6 +51,9 @@ export interface LibraryChapter {
   cleaned: number
   rendered: number
   approved: number
+  approvedText?: number
+  unpublished?: number
+  busy?: ChapterBusy | null
   reported: number
   locked: number
   lock: { workflowId: number; stage: WorkflowType } | null
@@ -90,6 +93,31 @@ export interface LaunchInput {
   pageIds?: string[]
   chapterNumbers?: number[]
   force?: boolean
+  includeDrafts?: boolean
+  confirmApproved?: boolean
+}
+
+export type ExcludeReason = 'busy' | 'not_scanned' | 'no_pages' | 'no_layers'
+
+export interface ChapterBusy {
+  workflowId: number
+  type: WorkflowType
+  label: string
+}
+
+export interface PlanChapter {
+  chapterId: string | null
+  number: number
+  selected: number
+  done: number
+  willRun: number
+  locked: number
+  missing: number
+  chapterLocked: boolean
+  busy?: ChapterBusy | null
+  reason?: ExcludeReason | null
+  approved?: number
+  drafts?: number
 }
 
 export interface PlanTotals {
@@ -98,6 +126,9 @@ export interface PlanTotals {
   willRun: number
   locked: number
   missing: number
+  approved?: number
+  drafts?: number
+  busy?: number
   noText: number
 }
 
@@ -105,7 +136,7 @@ export interface Plan {
   type: LaunchType
   force: boolean
   series: { id: string; slug: string; title: string }
-  chapters: { chapterId: string | null; number: number; selected: number; done: number; willRun: number; locked: number; missing: number; chapterLocked: boolean }[]
+  chapters: PlanChapter[]
   totals: PlanTotals
   needs: string | null
   keyMissing?: boolean
@@ -334,7 +365,11 @@ export const libraryApi = {
 
 export const workflowsApi = {
   plan: (input: LaunchInput) => post<Plan>('/workflows/plan', input),
-  create: (input: LaunchInput) => post<{ id: number; items: number; totals: PlanTotals }>('/workflows', input),
+  create: (input: LaunchInput) => post<{ id: number; items: number; totals: PlanTotals; excluded?: { number: number; reason: ExcludeReason; busy: ChapterBusy | null }[] }>('/workflows', input),
+  publishPages: (pageIds: string[]) =>
+    post<{ id: number; items: number; excluded: { busy: { number: number; busy: ChapterBusy }[]; busyPages: number; locked: number; editing: number; unchanged: number } }>('/review/publish', { pageIds }),
+  releaseChapter: (chapterId: string) => post<{ released: number; locks: number }>(`/workflows/chapters/${chapterId}/release`),
+  chapterBusy: (chapterId: string) => request<{ busy: ChapterBusy | null }>(`/workflows/chapters/${chapterId}/busy`),
   list: (q: { status?: string; type?: string; seriesId?: string; mine?: boolean; skip?: number; take?: number } = {}) =>
     request<{ total: number; rows: WorkflowRow[] }>(`/workflows${qs(q)}`),
   get: (id: number) => request<WorkflowDetail>(`/workflows/${id}`),
