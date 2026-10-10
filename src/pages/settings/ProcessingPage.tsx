@@ -5,6 +5,7 @@ import { Button, Card, EmptyState, Notice, Spinner } from '../../components/ui'
 import { num } from '../../lib/format'
 import { usePolling } from '../../lib/hooks'
 import { workflowsApi, type Lane, type LaneInfo, type ServerInfo } from '../../workflowsApi'
+import { GpuCard } from './GpuCard'
 import { SettingsLayout } from './SettingsLayout'
 
 const LANE_TEXT: Record<Lane, { title: string; types: string; hint: string }> = {
@@ -145,6 +146,7 @@ export function ProcessingPage() {
         </EmptyState>
       ) : (
         <>
+          <GpuCard sys={sys} />
           {d.server && <ServerLine s={d.server} />}
           <div className="grid gap-3 lg:grid-cols-3">
             {(d.lanes ?? []).map((l) => (

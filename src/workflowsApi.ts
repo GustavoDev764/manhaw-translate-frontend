@@ -268,6 +268,18 @@ export interface ServerInfo {
   opWorkers: number
 }
 
+export interface GpuStatus {
+  enabled: boolean
+  url: string
+  connected: boolean
+  error: string | null
+  health: {
+    status: string
+    worker: { device: string; gpu: string | null; vramTotalMb: number | null; vramUsedMb: number | null } | null
+    queues: Record<string, QueueCounts>
+  } | null
+}
+
 export interface Processing {
   workerConcurrency: number
   cleanOnScan: boolean
@@ -381,6 +393,8 @@ export const workflowsApi = {
   processing: () => request<Processing>('/settings/processing'),
   setProcessing: (lane: Lane, value: number) =>
     put<Record<string, number>>('/settings/processing', { [lane === 'process' ? 'workerConcurrency' : lane === 'light' ? 'workerConcurrencyLight' : 'workerConcurrencyTransfer']: value }),
+  gpu: () => request<GpuStatus>('/settings/processing/gpu'),
+  setGpu: (input: { enabled: boolean; url: string }) => put<GpuStatus>('/settings/processing/gpu', input),
   setCleanOnScan: (cleanOnScan: boolean) => put<{ cleanOnScan: boolean }>('/settings/processing', { cleanOnScan }),
   notifications: (unread = false) => request<AppNotification[]>(`/notifications${unread ? '?unread=1' : ''}`),
   readNotifications: (ids?: string[]) => post<{ updated: number }>('/notifications/read', { ids }),
