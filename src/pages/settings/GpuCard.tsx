@@ -55,6 +55,21 @@ export function GpuCard({ sys }: { sys: boolean }) {
     }
   }
 
+  const llm = s?.health?.llm
+  const llmReady = llm?.status === 'ready'
+  const toggleTranslate = async (next: boolean) => {
+    setBusy(true)
+    try {
+      await workflowsApi.setGpu({ translate: next })
+      toast('done', next ? 'Tradução com Gemma ligada: os próximos capítulos traduzem na GPU.' : 'Tradução com Gemma desligada: os próximos capítulos voltam para o Claude.')
+      await status.reload()
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const toggle = (next: boolean) => {
     setEnabled(next)
     if (!next && s?.enabled) void save(false)
@@ -107,6 +122,33 @@ export function GpuCard({ sys }: { sys: boolean }) {
             )}
           </div>
           {s.enabled && !dirty && <StatusLine s={s} />}
+        </div>
+      )}
+      {s?.enabled && s.connected && !dirty && (
+        <div className="flex items-start justify-between gap-3 border-t border-dashed border-slate-200 pt-3 dark:border-slate-800">
+          <div>
+            <span className="block font-semibold">Traduzir com Gemma</span>
+            <span className="block text-sm text-slate-500">Inglês → português na GPU, sem gastar créditos da Anthropic. Desligado, a tradução vai para o Claude.</span>
+            <span className="mt-1 block text-sm" data-testid="gemma-status">
+              {llmReady ? (
+                <b className="text-done">● {llm?.model ?? 'Gemma'} carregado</b>
+              ) : (
+                <span className="text-queued">● {llm?.status === 'disabled' || !llm ? 'O servidor de GPU não tem o Gemma ligado' : `Gemma ${llm.status === 'loading' ? 'carregando' : llm.status}${llm.error ? ` (${llm.error})` : ''}`}</span>
+              )}
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={s.translate}
+            aria-label="Traduzir com Gemma"
+            disabled={!sys || busy || (!s.translate && !llmReady)}
+            onClick={() => void toggleTranslate(!s.translate)}
+            data-testid="gemma-switch"
+            className={`relative mt-1 inline-block h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${s.translate ? 'bg-done' : 'bg-slate-300 dark:bg-slate-700'}`}
+          >
+            <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition ${s.translate ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
         </div>
       )}
       {!sys && <p className="text-xs text-slate-500">Só o Admin do sistema altera.</p>}

@@ -221,7 +221,12 @@ export function LaunchDialog({
             </span>
           </label>
         )}
-        {input.type === 'translate' && (
+        {input.type === 'translate' && plan?.provider === 'gpu' && (
+          <Notice tone="neutral">
+            A tradução vai para a GPU (Gemma 3 27B), sem gastar créditos da Anthropic. Costuma levar poucos minutos por capítulo. Se o Gemma estiver fora do ar, o item falha com o motivo e você escolhe em Workflows: desligar o Gemma e tentar de novo (vai para o Claude) ou corrigir a GPU e tentar de novo.
+          </Notice>
+        )}
+        {input.type === 'translate' && plan?.provider !== 'gpu' && (
           <Notice tone="neutral">
             A tradução vai pela fila da Anthropic, que custa metade do preço. Costuma ficar pronta em minutos, mas pode levar até 24 horas. Acompanhe em Workflows › Na Anthropic.
           </Notice>

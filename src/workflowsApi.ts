@@ -141,6 +141,7 @@ export interface Plan {
   needs: string | null
   keyMissing?: boolean
   unpublished?: number
+  provider?: 'anthropic' | 'gpu'
 }
 
 export interface WorkflowRow {
@@ -270,6 +271,7 @@ export interface ServerInfo {
 
 export interface GpuStatus {
   enabled: boolean
+  translate: boolean
   url: string
   connected: boolean
   error: string | null
@@ -277,6 +279,7 @@ export interface GpuStatus {
     status: string
     worker: { device: string; gpu: string | null; vramTotalMb: number | null; vramUsedMb: number | null } | null
     queues: Record<string, QueueCounts>
+    llm?: { status: string; model: string | null; maxContext: number | null; error: string | null }
   } | null
 }
 
@@ -394,7 +397,7 @@ export const workflowsApi = {
   setProcessing: (lane: Lane, value: number) =>
     put<Record<string, number>>('/settings/processing', { [lane === 'process' ? 'workerConcurrency' : lane === 'light' ? 'workerConcurrencyLight' : 'workerConcurrencyTransfer']: value }),
   gpu: () => request<GpuStatus>('/settings/processing/gpu'),
-  setGpu: (input: { enabled: boolean; url: string }) => put<GpuStatus>('/settings/processing/gpu', input),
+  setGpu: (input: { enabled?: boolean; url?: string; translate?: boolean }) => put<GpuStatus>('/settings/processing/gpu', input),
   setCleanOnScan: (cleanOnScan: boolean) => put<{ cleanOnScan: boolean }>('/settings/processing', { cleanOnScan }),
   notifications: (unread = false) => request<AppNotification[]>(`/notifications${unread ? '?unread=1' : ''}`),
   readNotifications: (ids?: string[]) => post<{ updated: number }>('/notifications/read', { ids }),
