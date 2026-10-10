@@ -17,7 +17,7 @@ import { useEditLock, useLayerDraft } from './review/useLayerDraft'
 
 type Mode = 'view' | 'area' | 'text'
 type Tab = 'comments' | 'text' | 'history'
-type View = { kind: 'current' } | { kind: 'original' } | { kind: 'clean' } | { kind: 'version'; assetId: string; number: number }
+type View = { kind: 'current' } | { kind: 'original' } | { kind: 'clean' } | { kind: 'cleanFull' } | { kind: 'marked' } | { kind: 'version'; assetId: string; number: number }
 
 const MIN_BOX = 8
 const MAX_FIT_SCALE = 2
@@ -162,7 +162,17 @@ export function ReviewPage({ pageId }: { pageId: string }) {
 
   const current = page.versions.find((v) => v.current)
   const imageId =
-    view.kind === 'original' ? page.originalAssetId : view.kind === 'clean' ? page.cleanAssetId : view.kind === 'version' ? view.assetId : (current?.assetId ?? page.originalAssetId)
+    view.kind === 'original'
+      ? page.originalAssetId
+      : view.kind === 'clean'
+        ? page.cleanAssetId
+        : view.kind === 'cleanFull'
+          ? page.cleanFullAssetId
+          : view.kind === 'marked'
+            ? page.markedAssetId
+            : view.kind === 'version'
+              ? view.assetId
+              : (current?.assetId ?? page.originalAssetId)
   const locked = !!page.lock
   const editing = tab === 'text' && view.kind === 'current' && page.editable
   const readOnlyReason = locked ? null : editLock.holder ? editLock.holder : !can('edit_text') ? DISABLED_REASON : null
@@ -292,6 +302,8 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                   ['current', 'Atual'],
                   ['original', 'Original'],
                   ...(page.cleanAssetId ? ([['clean', 'Limpa']] as const) : []),
+                  ...(page.cleanFullAssetId ? ([['cleanFull', 'Limpa completa']] as const) : []),
+                  ...(page.markedAssetId ? ([['marked', 'Marcada']] as const) : []),
                 ] as const
               ).map(([k, label]) => (
                 <Button key={k} size="sm" variant={view.kind === k ? 'secondary' : 'ghost'} onClick={() => setView({ kind: k } as View)}>

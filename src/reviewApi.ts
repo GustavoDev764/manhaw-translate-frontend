@@ -74,6 +74,8 @@ export interface ReviewPage {
   series: { id: string; slug: string; title: string }
   originalAssetId: string | null
   cleanAssetId: string | null
+  cleanFullAssetId: string | null
+  markedAssetId: string | null
   cleanBase: { originalAssetId: string; versions: number; isOriginal: boolean } | null
   size: { width: number; height: number } | null
   currentVersionId: string | null
