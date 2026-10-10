@@ -279,7 +279,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
                   </span>
                   {it.status === 'running' && it.progress && detail && PROGRESS_VERB[detail.type] && <ProgressLine verb={PROGRESS_VERB[detail.type]!} done={it.progress.done} total={it.progress.total} />}
                   {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} progress={it.status === 'failed' ? null : it.phaseProgress} prefix={it.status === 'failed' ? 'Parou em' : undefined} />}
-                  {it.batch && it.batch.batches.length > 0 && ['waiting_api', 'running', 'queued'].includes(it.status) && <BatchPanel batch={it.batch} />}
+                  {it.batch && it.batch.batches.length > 0 && <BatchPanel batch={it.batch} />}
                   {it.timings?.length > 0 && <TimingLine timings={it.timings} />}
                 </span>
                 <Badge tone={ITEM_STATUS[it.status].tone}>{ITEM_STATUS[it.status].label}</Badge>
