@@ -23,7 +23,9 @@ const ITEM_STATUS: Record<ItemStatus, { label: string; tone: Tone }> = {
 const PHASE_LABEL: Record<Phase, string> = {
   preparing: 'Copiando as páginas originais',
   glossary: 'Preparando o glossário',
-  submitting: 'Enviando para a fila da Anthropic',
+  series_wait: 'Aguardando outro capítulo desta série terminar o envio',
+  submitting: 'Preparando as páginas para a Anthropic',
+  uploading: 'Enviando as imagens para a Anthropic',
   waiting_api: 'Aguardando a Anthropic',
   collecting: 'Baixando as respostas e desenhando as imagens',
   glossary_update: 'Atualizando o glossário',
@@ -42,13 +44,26 @@ function lotsText(l: BatchLots) {
   return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} na Anthropic` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
 }
 
-export function PhaseLine({ phase, phaseAt, lots, prefix }: { phase: Phase; phaseAt: string | null; lots?: BatchLots | null; prefix?: string }) {
+const PHASE_UNIT: Partial<Record<Phase, string>> = { submitting: 'páginas', waiting_api: 'pedidos prontos', saving: 'páginas' }
+
+export function PhaseLine({ phase, phaseAt, lots, progress, prefix }: { phase: Phase; phaseAt: string | null; lots?: BatchLots | null; progress?: { done: number; total: number } | null; prefix?: string }) {
+  const unit = PHASE_UNIT[phase]
+  const shown = unit && progress && progress.total > 0 ? progress : null
+  const pct = shown ? Math.min(100, Math.round((shown.done / shown.total) * 100)) : 0
   return (
-    <span className="mt-1 block text-xs font-medium text-queued" data-testid="item-phase">
-      {prefix ? `${prefix} · ` : ''}
-      {PHASE_LABEL[phase] ?? phase}
-      {phaseAt ? ` · ${ago(phaseAt)}` : ''}
-      {lots && lots.total > 0 ? <span className="font-normal text-slate-500"> · {lotsText(lots)}</span> : null}
+    <span className="mt-1 block" data-testid="item-phase">
+      <span className="block text-xs font-medium text-queued">
+        {prefix ? `${prefix} · ` : ''}
+        {PHASE_LABEL[phase] ?? phase}
+        {shown ? ` · ${num(shown.done)} de ${num(shown.total)} ${unit} (${pct}%)` : ''}
+        {phaseAt ? ` · ${ago(phaseAt)}` : ''}
+        {lots && lots.total > 0 ? <span className="font-normal text-slate-500"> · {lotsText(lots)}</span> : null}
+      </span>
+      {shown && (
+        <span className="mt-0.5 block h-1 w-full max-w-64 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+          <span className="block h-full bg-queued transition-all" style={{ width: `${pct}%` }} />
+        </span>
+      )}
     </span>
   )
 }
@@ -151,7 +166,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                     {w.series?.title} · {chaptersLabel(w.chapters)} · {num(w.pages)} pág.
                   </span>
                   {PROGRESS_VERB[w.type] && w.progress.map((p) => <ProgressLine key={p.label} verb={PROGRESS_VERB[w.type]!} done={p.done} total={p.total} prefix={p.label} />)}
-                  {w.steps.map((st) => st.phase && <PhaseLine key={st.label} phase={st.phase} phaseAt={st.phaseAt} lots={st.lots} prefix={st.label} />)}
+                  {w.steps.map((st) => st.phase && <PhaseLine key={st.label} phase={st.phase} phaseAt={st.phaseAt} lots={st.lots} progress={st.progress} prefix={st.label} />)}
                 </span>
                 <span className="w-32">
                   <span className="block h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -233,7 +248,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
                     {it.errorMessage && it.status !== 'failed' ? `falha na tentativa anterior: ${it.errorMessage}` : ''}
                   </span>
                   {it.status === 'running' && it.progress && detail && PROGRESS_VERB[detail.type] && <ProgressLine verb={PROGRESS_VERB[detail.type]!} done={it.progress.done} total={it.progress.total} />}
-                  {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} prefix={it.status === 'failed' ? 'Parou em' : undefined} />}
+                  {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} progress={it.status === 'failed' ? null : it.phaseProgress} prefix={it.status === 'failed' ? 'Parou em' : undefined} />}
                   {it.batch && it.batch.batches.length > 0 && ['waiting_api', 'running', 'queued'].includes(it.status) && <BatchPanel batch={it.batch} />}
                 </span>
                 <Badge tone={ITEM_STATUS[it.status].tone}>{ITEM_STATUS[it.status].label}</Badge>

@@ -127,7 +127,7 @@ export interface WorkflowRow {
   items: number
   counts: Partial<Record<ItemStatus, number>>
   progress: { label: string; done: number; total: number }[]
-  steps: { label: string; phase: Phase | null; phaseAt: string | null; lots: BatchLots | null }[]
+  steps: { label: string; phase: Phase | null; phaseAt: string | null; lots: BatchLots | null; progress: { done: number; total: number } | null }[]
   pages: number
   costUsd: number
   title: string | null
@@ -154,6 +154,7 @@ export interface WorkflowItemRow {
   progress: { done: number; total: number } | null
   phase: Phase | null
   phaseAt: string | null
+  phaseProgress: { done: number; total: number } | null
   batch: ItemBatch | null
   startedAt: string | null
   finishedAt: string | null
@@ -164,7 +165,7 @@ export interface WorkflowDetail extends Omit<WorkflowRow, 'scan' | 'items' | 'co
   items: WorkflowItemRow[]
 }
 
-export type Phase = 'preparing' | 'glossary' | 'submitting' | 'waiting_api' | 'collecting' | 'glossary_update' | 'saving'
+export type Phase = 'preparing' | 'glossary' | 'series_wait' | 'submitting' | 'uploading' | 'waiting_api' | 'collecting' | 'glossary_update' | 'saving'
 
 export interface BatchLots {
   total: number
