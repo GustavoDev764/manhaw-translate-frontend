@@ -166,7 +166,7 @@ export interface WorkflowDetail extends Omit<WorkflowRow, 'scan' | 'items' | 'co
   items: WorkflowItemRow[]
 }
 
-export type Phase = 'preparing' | 'glossary' | 'series_wait' | 'submitting' | 'uploading' | 'waiting_api' | 'collecting' | 'glossary_update' | 'saving'
+export type Phase = 'preparing' | 'glossary' | 'series_wait' | 'submitting' | 'uploading' | 'rendering' | 'cleaning' | 'waiting_api' | 'collecting' | 'glossary_update' | 'saving'
 
 export interface BatchLots {
   total: number

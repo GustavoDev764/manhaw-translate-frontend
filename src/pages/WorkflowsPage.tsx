@@ -27,7 +27,9 @@ const PHASE_LABEL: Record<Phase, string> = {
   submitting: 'Preparando as páginas para a Anthropic',
   uploading: 'Enviando as imagens para a Anthropic',
   waiting_api: 'Aguardando a Anthropic',
-  collecting: 'Baixando as respostas e desenhando as imagens',
+  collecting: 'Baixando as respostas da Anthropic',
+  rendering: 'Desenhando as páginas',
+  cleaning: 'Limpando as páginas',
   glossary_update: 'Atualizando o glossário',
   saving: 'Salvando as páginas traduzidas',
 }
@@ -72,7 +74,7 @@ function lotsText(l: BatchLots) {
   return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} na Anthropic` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
 }
 
-const PHASE_UNIT: Partial<Record<Phase, string>> = { submitting: 'páginas', waiting_api: 'pedidos prontos', saving: 'páginas' }
+const PHASE_UNIT: Partial<Record<Phase, string>> = { submitting: 'páginas', waiting_api: 'pedidos prontos', rendering: 'páginas', cleaning: 'páginas', saving: 'páginas' }
 
 export function PhaseLine({ phase, phaseAt, lots, progress, prefix }: { phase: Phase; phaseAt: string | null; lots?: BatchLots | null; progress?: { done: number; total: number } | null; prefix?: string }) {
   const unit = PHASE_UNIT[phase]
