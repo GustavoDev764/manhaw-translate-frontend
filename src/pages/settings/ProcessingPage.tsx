@@ -17,6 +17,19 @@ export function ProcessingPage() {
   const d = info.data
   const current = value ?? d?.workerConcurrency ?? 5
 
+  const toggleClean = async (on: boolean) => {
+    setBusy(true)
+    try {
+      await workflowsApi.setCleanOnScan(on)
+      toast('done', on ? 'As páginas serão limpas logo depois de escanear.' : 'As páginas serão limpas enquanto o capítulo espera a Anthropic.')
+      await info.reload()
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const save = async () => {
     setBusy(true)
     try {
@@ -78,6 +91,17 @@ export function ProcessingPage() {
             ) : (
               <p className="text-xs text-slate-500">Só o Admin do sistema altera.</p>
             )}
+          </Card>
+          <Card className="space-y-2 p-4">
+            <label className="flex items-start gap-3">
+              <input type="checkbox" className="mt-1 accent-brand" checked={d.cleanOnScan} disabled={!sys || busy} onChange={(e) => toggleClean(e.target.checked)} data-testid="clean-on-scan" />
+              <span>
+                <span className="block font-semibold">Limpar as páginas logo depois de escanear</span>
+                <span className="block text-sm text-slate-500">
+                  Por padrão, as páginas são limpas (texto apagado) enquanto o capítulo espera a Anthropic, só quando ele vai ser traduzido. Ligue se a scan sempre traduz tudo o que escaneia: a tradução fica pronta mais rápido, mas o escaneamento usa mais CPU.
+                </span>
+              </span>
+            </label>
           </Card>
         </>
       )}

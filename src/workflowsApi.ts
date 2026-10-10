@@ -204,6 +204,7 @@ export interface ItemError {
 
 export interface Processing {
   workerConcurrency: number
+  cleanOnScan: boolean
   min: number
   max: number
   queue: { waiting: number; active: number; delayed: number }
@@ -299,6 +300,7 @@ export const workflowsApi = {
   checkBatch: (itemId: string) => post<{ status: ItemStatus; phase: Phase | null; phaseAt: string | null; batch: ItemBatch | null }>(`/workflows/items/${itemId}/check-batch`),
   processing: () => request<Processing>('/settings/processing'),
   setProcessing: (workerConcurrency: number) => put<{ workerConcurrency: number }>('/settings/processing', { workerConcurrency }),
+  setCleanOnScan: (cleanOnScan: boolean) => put<{ cleanOnScan: boolean }>('/settings/processing', { cleanOnScan }),
   notifications: (unread = false) => request<AppNotification[]>(`/notifications${unread ? '?unread=1' : ''}`),
   readNotifications: (ids?: string[]) => post<{ updated: number }>('/notifications/read', { ids }),
 }
