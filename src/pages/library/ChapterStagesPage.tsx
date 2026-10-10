@@ -18,6 +18,53 @@ const STAGE_DOTS: { key: keyof LibraryPage['stages']; label: string }[] = [
   { key: 'approved', label: 'Aprovada' },
 ]
 
+function PreparedFilesPanel({ chapterId }: { chapterId: string }) {
+  const [open, setOpen] = useState(false)
+  const files = usePolling(() => (open ? libraryApi.preparedFiles(chapterId) : Promise.resolve(null)), 0, [chapterId, open])
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white text-sm dark:border-slate-800 dark:bg-slate-900" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)} data-testid="prepared-files">
+      <summary className="cursor-pointer px-4 py-2 font-medium">Arquivos preparados para a tradução</summary>
+      <div className="space-y-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+        <p className="text-xs text-slate-500">Páginas limpas sem texto, páginas marcadas e folhas com os recortes dos balões. São refeitas só quando o capítulo é escaneado de novo.</p>
+        {files.error && <Notice tone="failed">{files.error}</Notice>}
+        {!files.data && !files.error && <Spinner />}
+        {files.data && !files.data.pages.length && !files.data.sheets.length && <p className="text-slate-500">Nada preparado ainda.</p>}
+        {files.data && files.data.pages.length > 0 && (
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {files.data.pages.map((p) => (
+              <li key={p.file} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+                <span className="w-24 text-slate-500">Página {p.position}</span>
+                {p.cleanFullId && (
+                  <span className="flex items-center gap-1">
+                    Limpa completa <FileLinks assetId={p.cleanFullId} label={`limpa completa da página ${p.position}`} />
+                  </span>
+                )}
+                {p.markedId && (
+                  <span className="flex items-center gap-1">
+                    Marcada <FileLinks assetId={p.markedId} label={`página ${p.position} marcada`} />
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {files.data && files.data.sheets.length > 0 && (
+          <div>
+            <p className="mb-1 font-medium">Folhas com os recortes dos balões (leitura)</p>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1">
+              {files.data.sheets.map((s, i) => (
+                <li key={s.id} className="flex items-center gap-1" title={s.name}>
+                  Folha {i + 1} <FileLinks assetId={s.id} label={`folha ${i + 1}`} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
 export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId: string }) {
   const { data, error, reload } = usePolling(() => libraryApi.pages(chapterId), 0, [chapterId])
   const series = usePolling(() => libraryApi.seriesDetail(slug), 0, [slug])
@@ -150,6 +197,8 @@ export function ChapterStagesPage({ slug, chapterId }: { slug: string; chapterId
           )
         })}
       </div>
+
+      <PreparedFilesPanel chapterId={chapterId} />
 
       <LaunchDialog
         input={launch}

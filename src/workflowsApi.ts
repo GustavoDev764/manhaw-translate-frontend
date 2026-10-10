@@ -202,6 +202,11 @@ export interface ItemError {
   error: { message: string; hint?: string | null; exitCode?: number | null; command?: string | null; tail?: string[]; pages?: string[]; attempt?: number; attempts?: number; at: string } | null
 }
 
+export interface PreparedFiles {
+  pages: { position: number; file: string; cleanFullId: string | null; markedId: string | null }[]
+  sheets: { id: string; name: string; createdAt: string }[]
+}
+
 export interface Processing {
   workerConcurrency: number
   cleanOnScan: boolean
@@ -285,6 +290,7 @@ export const libraryApi = {
   deleteSeries: (id: string, confirmation: string) => del<{ deleted: true; chapters: number; pages: number }>(`/library/series/${id}`, { confirmation }),
   seriesDetail: (slug: string) => request<LibrarySeriesDetail>(`/library/series/${encodeURIComponent(slug)}`),
   pages: (chapterId: string) => request<{ chapter: { id: string; number: number; folder: string; series: { slug: string; title: string } }; pages: LibraryPage[] }>(`/library/chapters/${chapterId}/pages`),
+  preparedFiles: (chapterId: string) => request<PreparedFiles>(`/library/chapters/${chapterId}/prepared-files`),
 }
 
 export const workflowsApi = {
