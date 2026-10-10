@@ -203,7 +203,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                     <span className="block h-full bg-done" style={{ width: `${pct}%` }} />
                   </span>
                   <span className="text-[11px] text-slate-500">
-                    {done}/{w.items} itens{w.counts.failed ? ` · ${w.counts.failed} com erro` : ''}
+                    {done}/{w.items} itens{w.counts.failed ? ` · ${w.counts.failed} com erro` : ''}{w.counts.queued && w.laneLabel ? ` · ${w.counts.queued} na fila ${w.laneLabel}` : ''}
                   </span>
                 </span>
                 <span className="w-36 text-xs text-slate-500">
@@ -282,7 +282,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
                   {it.batch && it.batch.batches.length > 0 && <BatchPanel batch={it.batch} />}
                   {it.timings?.length > 0 && <TimingLine timings={it.timings} />}
                 </span>
-                <Badge tone={ITEM_STATUS[it.status].tone}>{ITEM_STATUS[it.status].label}</Badge>
+                <Badge tone={ITEM_STATUS[it.status].tone}>{it.status === 'queued' && detail.laneLabel ? `Na fila ${detail.laneLabel}` : ITEM_STATUS[it.status].label}</Badge>
                 {it.hasError && (
                   <Button size="sm" variant="ghost" onClick={async () => setErrorOf(await workflowsApi.error(it.id))}>
                     Ver detalhes do erro

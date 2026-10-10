@@ -116,6 +116,8 @@ export interface WorkflowRow {
   id: number
   type: WorkflowType
   label: string
+  lane?: Lane
+  laneLabel?: string
   status: WorkflowStatus
   force: boolean
   series: { id: string; slug: string; title: string } | null
@@ -207,12 +209,42 @@ export interface PreparedFiles {
   sheets: { id: string; name: string; createdAt: string }[]
 }
 
+export type Lane = 'light' | 'process' | 'transfer'
+
+export interface QueueCounts {
+  waiting: number
+  active: number
+  delayed: number
+}
+
+export interface LaneInfo {
+  lane: Lane
+  label: string
+  concurrency: number
+  default: number
+  min: number
+  max: number
+  queue: QueueCounts
+}
+
+export interface ServerInfo {
+  model: string | null
+  mhz: number | null
+  threads: number
+  containerCpus: number | null
+  memoryBytes: number
+  memoryLimited: boolean
+  opWorkers: number
+}
+
 export interface Processing {
   workerConcurrency: number
   cleanOnScan: boolean
   min: number
   max: number
-  queue: { waiting: number; active: number; delayed: number }
+  queue: QueueCounts
+  lanes: LaneInfo[]
+  server: ServerInfo
 }
 
 export interface AppNotification {
@@ -312,7 +344,8 @@ export const workflowsApi = {
   skip: (itemId: string) => post<{ ok: true }>(`/workflows/items/${itemId}/skip`),
   checkBatch: (itemId: string) => post<{ status: ItemStatus; phase: Phase | null; phaseAt: string | null; batch: ItemBatch | null }>(`/workflows/items/${itemId}/check-batch`),
   processing: () => request<Processing>('/settings/processing'),
-  setProcessing: (workerConcurrency: number) => put<{ workerConcurrency: number }>('/settings/processing', { workerConcurrency }),
+  setProcessing: (lane: Lane, value: number) =>
+    put<Record<string, number>>('/settings/processing', { [lane === 'process' ? 'workerConcurrency' : lane === 'light' ? 'workerConcurrencyLight' : 'workerConcurrencyTransfer']: value }),
   setCleanOnScan: (cleanOnScan: boolean) => put<{ cleanOnScan: boolean }>('/settings/processing', { cleanOnScan }),
   notifications: (unread = false) => request<AppNotification[]>(`/notifications${unread ? '?unread=1' : ''}`),
   readNotifications: (ids?: string[]) => post<{ updated: number }>('/notifications/read', { ids }),
