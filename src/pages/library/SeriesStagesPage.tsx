@@ -12,7 +12,7 @@ import { useWorkflowEvents } from '../../lib/workflowEvents'
 import { href, navigate, usePolling } from '../../lib/hooks'
 import { AlertTriangle } from '../../components/AlertTriangle'
 import { DownloadsDrawer, OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
-import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter } from '../../workflowsApi'
+import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter, type PackageInclude } from '../../workflowsApi'
 
 const SITE_DOWNLOAD_ENABLED = false
 
@@ -37,6 +37,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const [launch, setLaunch] = useState<Omit<LaunchInput, 'force'> | null>(null)
   const [downloadOpen, setDownloadOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [packaging, setPackaging] = useState(false)
   const [ranging, setRanging] = useState(false)
   const { uploads, add: addUploads, dismiss } = useUploads()
   const zipInput = useRef<HTMLInputElement>(null)
@@ -132,7 +133,11 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
             hidden
             data-testid="zip-input"
             onChange={(e) => {
-              addUploads(data.id, Array.from(e.target.files ?? []))
+              addUploads(
+                data.id,
+                Array.from(e.target.files ?? []),
+                chapters.map((c) => ({ number: c.number, pages: c.pages, translated: c.translated, rendered: c.rendered })),
+              )
               e.target.value = ''
             }}
           />
@@ -164,6 +169,9 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
         <div className="flex gap-2">
           <Button size="sm" onClick={() => setExporting(true)} disabled={!exportable.length} title={exportable.length ? 'Baixa os capítulos selecionados num .zip, uma pasta por capítulo' : 'Selecione capítulos com páginas'}>
             Baixar .zip{exportable.length ? ` (${exportable.length})` : ''}
+          </Button>
+          <Button size="sm" onClick={() => setPackaging(true)} disabled={!exportable.length} title={exportable.length ? 'Um .zip por capítulo com imagens, escaneamento, tradução e glossário, para importar em outro ambiente' : 'Selecione capítulos com páginas'} data-testid="export-package">
+            Exportar pacote{exportable.length ? ` (${exportable.length})` : ''}
           </Button>
           <DownloadsDrawer seriesId={data.id} />
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(chapters.filter((c) => c.pages > 0).map((c) => c.id)))}>
@@ -232,6 +240,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
         void reload()
       }} />
       <ExportDialog open={exporting} seriesId={data.id} chapters={exportable} onClose={() => setExporting(false)} />
+      <PackageDialog open={packaging} seriesId={data.id} chapters={exportable} onClose={() => setPackaging(false)} />
       <RangeDialog
         open={ranging}
         chapters={chapters}
@@ -523,6 +532,72 @@ function ExportDialog({ open, seriesId, chapters, onClose }: { open: boolean; se
           </label>
         </fieldset>
         <p className="text-xs text-slate-500">O zip é montado no servidor e aparece em Downloads (no topo da tela) quando ficar pronto. Fica disponível por 24 horas para qualquer pessoa da scan.</p>
+      </div>
+    </Dialog>
+  )
+}
+
+const PACKAGE_OPTIONS: { key: keyof PackageInclude; label: string; hint: string }[] = [
+  { key: 'analysis', label: 'Escaneamento (detecção dos balões)', hint: 'analysis.json' },
+  { key: 'layers', label: 'Tradução: caixas de texto e página limpa', hint: 'layers.json + clean/' },
+  { key: 'translated', label: 'Imagens traduzidas publicadas', hint: 'translated/ · deixa o pacote maior' },
+  { key: 'glossary', label: 'Glossário da série', hint: 'glossary.json' },
+]
+
+function PackageDialog({ open, seriesId, chapters, onClose }: { open: boolean; seriesId: string; chapters: LibraryChapter[]; onClose: () => void }) {
+  const [include, setInclude] = useState<PackageInclude>({ analysis: true, layers: true, translated: true, glossary: true })
+  const numbers = chapters.map((c) => c.number).sort((a, b) => a - b)
+  const pages = chapters.reduce((s, c) => s + c.pages, 0)
+  const { toast } = useJobs()
+  const [sending, setSending] = useState(false)
+  const start = async () => {
+    setSending(true)
+    try {
+      await exportsApi.create(seriesId, numbers, 'package', include)
+      toast('done', 'Gerando o pacote. Ele aparece em Downloads quando ficar pronto.')
+      onClose()
+      window.dispatchEvent(new Event(OPEN_DOWNLOADS))
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Exportar pacote · ${chapters.length === 1 ? 'cap.' : 'caps.'} ${chapterSpec(numbers)}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" onClick={start} disabled={!chapters.length || sending} data-testid="export-package-start">
+            {sending ? <Spinner /> : 'Exportar'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <p>
+          Um .zip por capítulo ({num(chapters.length)} {chapters.length === 1 ? 'capítulo' : 'capítulos'}, {num(pages)} páginas), para importar em outro ambiente já traduzido. <b>Não é só o download das imagens:</b> para isso use o Baixar .zip.
+        </p>
+        <fieldset className="space-y-1.5">
+          <label className="flex items-start gap-2 text-slate-500">
+            <input type="checkbox" className="mt-1" checked disabled />
+            <span>
+              Páginas originais <span className="block text-xs">sempre incluídas</span>
+            </span>
+          </label>
+          {PACKAGE_OPTIONS.map((o) => (
+            <label key={o.key} className="flex items-start gap-2">
+              <input type="checkbox" className="mt-1 accent-brand" checked={include[o.key]} onChange={(e) => setInclude({ ...include, [o.key]: e.target.checked })} />
+              <span>
+                {o.label} <span className="block text-xs text-slate-500">{o.hint}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <p className="text-xs text-slate-500">O resultado é um .zip com um .zip por capítulo dentro (6.zip, 7.zip…): extraia e use “Importar capítulos” no outro ambiente. Fica em Downloads por 24 horas.</p>
       </div>
     </Dialog>
   )

@@ -9,11 +9,19 @@ export interface Upload {
   total: number
   status: 'waiting' | 'uploading' | 'failed'
   error?: string
+  overwrite?: boolean
+}
+
+export interface ExistingChapter {
+  number: number
+  pages: number
+  translated: number
+  rendered: number
 }
 
 export interface UploadsState {
   uploads: Upload[]
-  add: (seriesId: string, files: File[]) => void
+  add: (seriesId: string, files: File[], existing?: ExistingChapter[]) => void
   dismiss: (id: string) => void
 }
 

@@ -233,7 +233,14 @@ const qs = (q: Record<string, string | number | boolean | undefined>) => {
   return s ? `?${s}` : ''
 }
 
-export type ExportKind = 'current' | 'original'
+export type ExportKind = 'current' | 'original' | 'package'
+
+export interface PackageInclude {
+  analysis: boolean
+  layers: boolean
+  translated: boolean
+  glossary: boolean
+}
 
 export function chapterSpec(numbers: number[]): string {
   const sorted = [...new Set(numbers)].sort((a, b) => a - b)
@@ -275,7 +282,7 @@ export interface ChapterExport {
 export const DOWNLOADS_CHANGED = 'downloads:changed'
 
 export const exportsApi = {
-  create: (seriesId: string, numbers: number[], kind: ExportKind) => post<{ id: string; workflowId: number | null; reused?: boolean }>(`/library/series/${seriesId}/exports`, { chapters: chapterSpec(numbers), kind }),
+  create: (seriesId: string, numbers: number[], kind: ExportKind, include?: PackageInclude) => post<{ id: string; workflowId: number | null; reused?: boolean }>(`/library/series/${seriesId}/exports`, { chapters: chapterSpec(numbers), kind, ...(include ? { include } : {}) }),
   list: () => request<ChapterExport[]>('/exports'),
   remove: (id: string) => del<{ ok: true }>(`/exports/${id}`),
   downloadUrl: (id: string) => `/api/exports/${id}/download`,

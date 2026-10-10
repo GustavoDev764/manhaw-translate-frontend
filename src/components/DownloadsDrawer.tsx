@@ -120,7 +120,7 @@ export function DownloadsDrawer({ seriesId }: { seriesId: string }) {
                     {e.fileName}
                   </div>
                   <div className="truncate text-xs text-slate-500">
-                    {e.chapters === 1 ? 'cap.' : 'caps.'} {e.spec} · {e.kind === 'original' ? 'originais' : 'traduzidas'}
+                    {e.chapters === 1 ? 'cap.' : 'caps.'} {e.spec} · {e.kind === 'original' ? 'originais' : e.kind === 'package' ? 'pacote para importar' : 'traduzidas'}
                   </div>
                 </div>
                 {e.status === 'ready' ? <Badge tone="done">pronto</Badge> : e.status === 'pending' ? <Badge tone="queued">gerando</Badge> : <Badge tone="failed">falhou</Badge>}
