@@ -155,6 +155,7 @@ export interface WorkflowItemRow {
   phase: Phase | null
   phaseAt: string | null
   phaseProgress: { done: number; total: number } | null
+  timings: { phase: string; seconds: number }[]
   batch: ItemBatch | null
   startedAt: string | null
   finishedAt: string | null

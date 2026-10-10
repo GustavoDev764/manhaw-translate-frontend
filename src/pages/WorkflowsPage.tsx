@@ -32,6 +32,34 @@ const PHASE_LABEL: Record<Phase, string> = {
   saving: 'Salvando as páginas traduzidas',
 }
 
+const TIMING_LABEL: Record<string, string> = {
+  preparing: 'cópia',
+  glossary: 'glossário',
+  series_wait: 'fila da série',
+  submitting: 'preparo',
+  uploading: 'upload',
+  waiting_api: 'Anthropic',
+  collecting: 'coleta',
+  rendering: 'desenho',
+  cleaning: 'limpeza',
+  glossary_update: 'glossário',
+  saving: 'salvar',
+}
+
+function duration(s: number) {
+  if (s >= 3600) return `${Math.floor(s / 3600)}h${String(Math.round((s % 3600) / 60)).padStart(2, '0')}`
+  if (s >= 90) return `${Math.round(s / 60)}min`
+  return `${Math.max(1, Math.round(s))}s`
+}
+
+function TimingLine({ timings }: { timings: { phase: string; seconds: number }[] }) {
+  return (
+    <span className="mt-1 block text-[11px] text-slate-500" data-testid="item-timings">
+      Tempos: {timings.map((t) => `${TIMING_LABEL[t.phase] ?? t.phase} ${duration(t.seconds)}`).join(' · ')}
+    </span>
+  )
+}
+
 const BATCH_STATUS: Record<AnthropicBatch['status'], string> = {
   in_progress: 'Em processamento',
   canceling: 'Cancelando',
@@ -250,6 +278,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
                   {it.status === 'running' && it.progress && detail && PROGRESS_VERB[detail.type] && <ProgressLine verb={PROGRESS_VERB[detail.type]!} done={it.progress.done} total={it.progress.total} />}
                   {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} progress={it.status === 'failed' ? null : it.phaseProgress} prefix={it.status === 'failed' ? 'Parou em' : undefined} />}
                   {it.batch && it.batch.batches.length > 0 && ['waiting_api', 'running', 'queued'].includes(it.status) && <BatchPanel batch={it.batch} />}
+                  {it.timings?.length > 0 && <TimingLine timings={it.timings} />}
                 </span>
                 <Badge tone={ITEM_STATUS[it.status].tone}>{ITEM_STATUS[it.status].label}</Badge>
                 {it.hasError && (
