@@ -34,6 +34,15 @@ const PHASE_LABEL: Record<Phase, string> = {
   saving: 'Salvando as páginas traduzidas',
 }
 
+const PHASE_LABEL_GPU: Partial<Record<Phase, string>> = {
+  submitting: 'Preparando as páginas para o Gemma',
+  uploading: 'Enviando as imagens para a GPU',
+  waiting_api: 'Gemma traduzindo na GPU',
+  collecting: 'Baixando as respostas da GPU',
+}
+
+const phaseLabel = (phase: Phase, gpu?: boolean) => (gpu && PHASE_LABEL_GPU[phase]) || PHASE_LABEL[phase] || phase
+
 const TIMING_LABEL: Record<string, string> = {
   preparing: 'cópia',
   glossary: 'glossário',
@@ -54,10 +63,10 @@ function duration(s: number) {
   return `${Math.max(1, Math.round(s))}s`
 }
 
-function TimingLine({ timings }: { timings: { phase: string; seconds: number }[] }) {
+function TimingLine({ timings, gpu }: { timings: { phase: string; seconds: number }[]; gpu?: boolean }) {
   return (
     <span className="mt-1 block text-[11px] text-slate-500" data-testid="item-timings">
-      Tempos: {timings.map((t) => `${TIMING_LABEL[t.phase] ?? t.phase} ${duration(t.seconds)}`).join(' · ')}
+      Tempos: {timings.map((t) => `${gpu && t.phase === 'waiting_api' ? 'Gemma' : (TIMING_LABEL[t.phase] ?? t.phase)} ${duration(t.seconds)}`).join(' · ')}
     </span>
   )
 }
@@ -70,13 +79,13 @@ const BATCH_STATUS: Record<AnthropicBatch['status'], string> = {
 
 type Filter = 'active' | 'anthropic' | 'all' | 'failed' | 'mine'
 
-function lotsText(l: BatchLots) {
-  return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} na Anthropic` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
+function lotsText(l: BatchLots, gpu?: boolean) {
+  return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} ${gpu ? 'na GPU' : 'na Anthropic'}` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
 }
 
 const PHASE_UNIT: Partial<Record<Phase, string>> = { submitting: 'páginas', waiting_api: 'pedidos prontos', rendering: 'páginas', cleaning: 'páginas', saving: 'páginas' }
 
-export function PhaseLine({ phase, phaseAt, lots, progress, prefix }: { phase: Phase; phaseAt: string | null; lots?: BatchLots | null; progress?: { done: number; total: number } | null; prefix?: string }) {
+export function PhaseLine({ phase, phaseAt, lots, progress, prefix, gpu }: { phase: Phase; phaseAt: string | null; lots?: BatchLots | null; progress?: { done: number; total: number } | null; prefix?: string; gpu?: boolean }) {
   const unit = PHASE_UNIT[phase]
   const shown = unit && progress && progress.total > 0 ? progress : null
   const pct = shown ? Math.min(100, Math.round((shown.done / shown.total) * 100)) : 0
@@ -84,10 +93,10 @@ export function PhaseLine({ phase, phaseAt, lots, progress, prefix }: { phase: P
     <span className="mt-1 block" data-testid="item-phase">
       <span className="block text-xs font-medium text-queued">
         {prefix ? `${prefix} · ` : ''}
-        {PHASE_LABEL[phase] ?? phase}
+        {phaseLabel(phase, gpu)}
         {shown ? ` · ${num(shown.done)} de ${num(shown.total)} ${unit} (${pct}%)` : ''}
         {phaseAt ? ` · ${ago(phaseAt)}` : ''}
-        {lots && lots.total > 0 ? <span className="font-normal text-slate-500"> · {lotsText(lots)}</span> : null}
+        {lots && lots.total > 0 ? <span className="font-normal text-slate-500"> · {lotsText(lots, gpu)}</span> : null}
       </span>
       {shown && (
         <span className="mt-0.5 block h-1 w-full max-w-64 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -98,11 +107,11 @@ export function PhaseLine({ phase, phaseAt, lots, progress, prefix }: { phase: P
   )
 }
 
-function BatchPanel({ batch }: { batch: ItemBatch }) {
+function BatchPanel({ batch, gpu }: { batch: ItemBatch; gpu?: boolean }) {
   return (
     <span className="mt-2 block rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs dark:border-slate-800 dark:bg-slate-900/60">
       <span className="block text-slate-600 dark:text-slate-300">
-        Enviado {ago(batch.submittedAt)} · {lotsText(batch.lots)}
+        Enviado {ago(batch.submittedAt)} · {lotsText(batch.lots, gpu)}
         {batch.checkedAt ? ` · consultado ${ago(batch.checkedAt)}` : ''}
       </span>
       {batch.batches.map((b) => {
@@ -168,7 +177,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
         onChange={setFilter}
         tabs={[
           { value: 'active', label: 'Em andamento' },
-          { value: 'anthropic', label: 'Na Anthropic' },
+          { value: 'anthropic', label: 'Aguardando tradução' },
           { value: 'failed', label: 'Com falha' },
           { value: 'mine', label: 'Meus' },
           { value: 'all', label: 'Todos' },
@@ -180,7 +189,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
           <Spinner /> Carregando…
         </EmptyState>
       )}
-      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : filter === 'anthropic' ? 'Nada aguardando a Anthropic agora.' : 'Nenhum workflow.'}</EmptyState>}
+      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : filter === 'anthropic' ? 'Nada aguardando tradução agora.' : 'Nenhum workflow.'}</EmptyState>}
       {list.data && list.data.rows.length > 0 && (
         <Card className="divide-y divide-slate-100 dark:divide-slate-800">
           {list.data.rows.map((w) => {
@@ -196,7 +205,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                     {w.series?.title} · {chaptersLabel(w.chapters)} · {num(w.pages)} pág.
                   </span>
                   {PROGRESS_VERB[w.type] && w.progress.map((p) => <ProgressLine key={p.label} verb={PROGRESS_VERB[w.type]!} done={p.done} total={p.total} prefix={p.label} />)}
-                  {w.steps.map((st) => st.phase && <PhaseLine key={st.label} phase={st.phase} phaseAt={st.phaseAt} lots={st.lots} progress={st.progress} prefix={st.label} />)}
+                  {w.steps.map((st) => st.phase && <PhaseLine key={st.label} phase={st.phase} phaseAt={st.phaseAt} lots={st.lots} progress={st.progress} prefix={st.label} gpu={st.gpu} />)}
                 </span>
                 <span className="w-32">
                   <span className="block h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -278,19 +287,19 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
                     {it.errorMessage && it.status !== 'failed' ? `falha na tentativa anterior: ${it.errorMessage}` : ''}
                   </span>
                   {it.status === 'running' && it.progress && detail && PROGRESS_VERB[detail.type] && <ProgressLine verb={PROGRESS_VERB[detail.type]!} done={it.progress.done} total={it.progress.total} />}
-                  {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} progress={it.status === 'failed' ? null : it.phaseProgress} prefix={it.status === 'failed' ? 'Parou em' : undefined} />}
-                  {it.batch && it.batch.batches.length > 0 && <BatchPanel batch={it.batch} />}
-                  {it.timings?.length > 0 && <TimingLine timings={it.timings} />}
+                  {it.phase && ['running', 'waiting_api', 'queued', 'failed'].includes(it.status) && <PhaseLine phase={it.phase} phaseAt={it.phaseAt} progress={it.status === 'failed' ? null : it.phaseProgress} prefix={it.status === 'failed' ? 'Parou em' : undefined} gpu={it.gpu} />}
+                  {it.batch && it.batch.batches.length > 0 && <BatchPanel batch={it.batch} gpu={it.gpu} />}
+                  {it.timings?.length > 0 && <TimingLine timings={it.timings} gpu={it.gpu} />}
                 </span>
-                <Badge tone={ITEM_STATUS[it.status].tone}>{it.status === 'queued' && detail.laneLabel ? `Na fila ${detail.laneLabel}` : ITEM_STATUS[it.status].label}</Badge>
+                <Badge tone={ITEM_STATUS[it.status].tone}>{it.status === 'queued' && detail.laneLabel ? `Na fila ${detail.laneLabel}` : it.status === 'waiting_api' && it.gpu ? 'Na fila da GPU (Gemma)' : ITEM_STATUS[it.status].label}</Badge>
                 {it.hasError && (
                   <Button size="sm" variant="ghost" onClick={async () => setErrorOf(await workflowsApi.error(it.id))}>
                     Ver detalhes do erro
                   </Button>
                 )}
                 {it.status === 'waiting_api' && (
-                  <Button size="sm" disabled={busy === `c${it.id}`} onClick={() => act(`c${it.id}`, () => workflowsApi.checkBatch(it.id), `${it.label}: status atualizado com a Anthropic.`)}>
-                    Consultar na Anthropic
+                  <Button size="sm" disabled={busy === `c${it.id}`} onClick={() => act(`c${it.id}`, () => workflowsApi.checkBatch(it.id), `${it.label}: status atualizado com a ${it.gpu ? 'GPU' : 'Anthropic'}.`)}>
+                    {it.gpu ? 'Consultar na GPU' : 'Consultar na Anthropic'}
                   </Button>
                 )}
                 {['failed', 'canceled'].includes(it.status) && (

@@ -161,7 +161,7 @@ export interface WorkflowRow {
   items: number
   counts: Partial<Record<ItemStatus, number>>
   progress: { label: string; done: number; total: number }[]
-  steps: { label: string; phase: Phase | null; phaseAt: string | null; lots: BatchLots | null; progress: { done: number; total: number } | null }[]
+  steps: { label: string; phase: Phase | null; phaseAt: string | null; lots: BatchLots | null; progress: { done: number; total: number } | null; gpu?: boolean }[]
   pages: number
   costUsd: number
   title: string | null
@@ -182,6 +182,7 @@ export interface WorkflowItemRow {
   errorMessage: string | null
   ocrModel: string | null
   translationModel: string | null
+  gpu?: boolean
   inputTokens: number
   outputTokens: number
   costUsd: number

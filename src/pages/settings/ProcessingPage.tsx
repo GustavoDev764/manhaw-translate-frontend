@@ -124,7 +124,7 @@ export function ProcessingPage() {
     setBusy(true)
     try {
       await workflowsApi.setCleanOnScan(on)
-      toast('done', on ? 'As páginas serão limpas logo depois de escanear.' : 'As páginas serão limpas enquanto o capítulo espera a Anthropic.')
+      toast('done', on ? 'As páginas serão limpas logo depois de escanear.' : 'As páginas serão limpas enquanto o capítulo espera a tradução.')
       await info.reload()
     } catch (err) {
       toast('failed', err instanceof Error ? err.message : String(err))
@@ -160,7 +160,7 @@ export function ProcessingPage() {
               <span>
                 <span className="block font-semibold">Limpar as páginas logo depois de escanear</span>
                 <span className="block text-sm text-slate-500">
-                  Por padrão, as páginas são limpas (texto apagado) enquanto o capítulo espera a Anthropic, só quando ele vai ser traduzido. Ligue se a scan sempre traduz tudo o que escaneia: a tradução fica pronta mais rápido, mas o escaneamento usa mais CPU.
+                  Por padrão, as páginas são limpas (texto apagado) enquanto o capítulo espera a tradução (Anthropic ou Gemma), só quando ele vai ser traduzido. Ligue se a scan sempre traduz tudo o que escaneia: a tradução fica pronta mais rápido, mas o escaneamento usa mais CPU.
                 </span>
               </span>
             </label>
