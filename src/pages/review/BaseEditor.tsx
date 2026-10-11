@@ -6,11 +6,14 @@ import { cx } from '../../lib/cx'
 import { applyRemoval, magicWand, maskPixelCount, MASK_COLOR, METHOD_LABEL, WandError, type Method } from '../../lib/opencv/inpaint'
 import { loadOpenCv, type CV } from '../../lib/opencv/opencv'
 import { reviewApi, type ReviewPage } from '../../reviewApi'
+import { blankCanvas, ctx2d, flatten, FUNDO, layerFromSnap, mountCanvas, newLayerId, snapLayer, type Layer, type LayerSnap } from './baseLayers'
+import { LayersPanel } from './LayersPanel'
 
-type Tool = 'brush' | 'imageEraser' | 'eraser' | 'wand' | 'crop' | 'hand'
+type Tool = 'move' | 'brush' | 'imageEraser' | 'eraser' | 'wand' | 'crop' | 'hand'
 type Point = { x: number; y: number }
 type Rect = { x: number; y: number; w: number; h: number }
-type Step = { before: ImageData; origin: Point; label: string }
+type Snapshot = { fundo: ImageData; origin: Point; layers: LayerSnap[] }
+type Step = Snapshot & { label: string }
 type CropDrag = { mode: string; start: Point; rect: Rect }
 
 const MIN_CROP = 8
@@ -21,8 +24,19 @@ const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
 
+const LAYER_STEPS = ['Nova camada', 'Mover', 'Mesclar', 'Excluir', 'Duplicar', 'Ordem']
 const stepIcon = (label: string) =>
-  label.startsWith('Caneta') ? ICONS.wand : label.startsWith('Recorte') ? ICONS.crop : label.startsWith('Importada') ? ICONS.upload : label.startsWith('Borracha') ? ICONS.imageEraser : ICONS.brush
+  LAYER_STEPS.some((s) => label.startsWith(s))
+    ? ICONS.layers
+    : label.startsWith('Caneta')
+      ? ICONS.wand
+      : label.startsWith('Recorte')
+        ? ICONS.crop
+        : label.startsWith('Importada')
+          ? ICONS.upload
+          : label.startsWith('Borracha')
+            ? ICONS.imageEraser
+            : ICONS.brush
 const toHex = (r: number, g: number, b: number) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
 const mimeOf = (file: string) => MIME[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'image/png'
 const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
@@ -35,7 +49,24 @@ function Svg({ children, className }: { children: ReactNode; className?: string 
   )
 }
 
-const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 'fit' | 'upload', ReactNode> = {
+const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 'fit' | 'upload' | 'layers', ReactNode> = {
+  move: (
+    <>
+      <path d="M12 2v20" />
+      <path d="m15 19-3 3-3-3" />
+      <path d="m19 9 3 3-3 3" />
+      <path d="M2 12h20" />
+      <path d="m5 9-3 3 3 3" />
+      <path d="m9 5 3-3 3 3" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="m12 2 10 5-10 5L2 7l10-5Z" />
+      <path d="m2 17 10 5 10-5" />
+      <path d="m2 12 10 5 10-5" />
+    </>
+  ),
   crop: (
     <>
       <path d="M6 2v14a2 2 0 0 0 2 2h14" />
@@ -134,6 +165,7 @@ const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 
 }
 
 const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
+  { tool: 'move', label: 'Mover', key: 'V', hint: 'Arraste para mover a camada selecionada no painel Camadas' },
   { tool: 'brush', label: 'Pincel', key: 'B', hint: 'Pinte por cima do que quer remover' },
   { tool: 'imageEraser', label: 'Borracha de imagem', key: 'E', hint: 'Apaga direto na imagem pintando com a cor escolhida (Alt+clique pega a cor da imagem)' },
   { tool: 'eraser', label: 'Borracha de máscara', key: 'M', hint: 'Tira o vermelho onde a máscara passou do ponto; não apaga a imagem (para isso, pinte com o Pincel e clique em Remover)' },
@@ -144,7 +176,7 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
 
 const SHORTCUTS: [string, string][] = [
   ['B / E / M', 'Pincel, borracha de imagem, borracha de máscara'],
-  ['W / R / H', 'Caneta mágica, recorte, mão'],
+  ['V / W / R / H', 'Mover camada, caneta mágica, recorte, mão'],
   ['Alt+clique', 'Pegar a cor da imagem (borracha de imagem)'],
   ['[ e ]', 'Diminuir / aumentar pincel'],
   ['Enter', 'Remover a máscara / aplicar o recorte'],
@@ -248,7 +280,13 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [crop, setCrop] = useState<Rect | null>(null)
   const [cropCursor, setCropCursor] = useState('crosshair')
   const [importing, setImporting] = useState<{ bitmap: ImageBitmap; name: string } | null>(null)
+  const [layers, setLayersState] = useState<Layer[]>([])
+  const [activeId, setActiveId] = useState<string>(FUNDO)
+  const [fundoVisible, setFundoVisible] = useState(true)
   const [ask, confirmDialog] = useConfirm()
+  const layersRef = useRef<Layer[]>([])
+  const layerFileRef = useRef<HTMLInputElement>(null)
+  const moveDrag = useRef<{ start: Point; x: number; y: number; before: Snapshot; moved: boolean } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const originRef = useRef<Point>({ x: 0, y: 0 })
   const cropDrag = useRef<CropDrag | null>(null)
@@ -376,8 +414,27 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     return () => window.removeEventListener('pointerdown', outside)
   }, [eraserMenu])
 
-  const pushUndo = (before: ImageData, label: string) => {
-    undoStack.current.push({ before, origin: originRef.current, label })
+  const setLayers = (next: Layer[]) => {
+    layersRef.current = next
+    setLayersState(next)
+  }
+
+  const activeLayer = () => layersRef.current.find((l) => l.id === activeId) ?? null
+
+  const snapshot = (): Snapshot => ({ fundo: fullImage(), origin: originRef.current, layers: layersRef.current.map(snapLayer) })
+
+  const restore = (s: Snapshot) => {
+    const image = imageRef.current!
+    if (s.fundo.width !== image.width || s.fundo.height !== image.height) resizeCanvases(s.fundo.width, s.fundo.height)
+    imageCtx().putImageData(s.fundo, 0, 0)
+    setOrigin(s.origin)
+    const next = s.layers.map(layerFromSnap)
+    setLayers(next)
+    if (!next.some((l) => l.id === activeId)) setActiveId(FUNDO)
+  }
+
+  const pushUndo = (before: Snapshot, label: string) => {
+    undoStack.current.push({ ...before, label })
     if (undoStack.current.length > HISTORY_LIMIT) {
       undoStack.current.shift()
       dropped.current = true
@@ -399,7 +456,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
 
   const apply = () => {
     if (!cv || !imageRef.current || !maskRef.current) return
-    const before = fullImage()
+    const before = snapshot()
     const result = applyRemoval(cv, imageRef.current, maskRef.current, { method, radius, dilate })
     if (!result) {
       setStatus({ text: 'Pinte uma máscara (ou use a caneta mágica) antes de remover.', error: true })
@@ -414,10 +471,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     const step = from.pop()
     const image = imageRef.current
     if (!step || !image) return false
-    to.push({ before: fullImage(), origin: originRef.current, label: step.label })
-    if (step.before.width !== image.width || step.before.height !== image.height) resizeCanvases(step.before.width, step.before.height)
-    imageCtx().putImageData(step.before, 0, 0)
-    setOrigin(step.origin)
+    to.push({ ...snapshot(), label: step.label })
+    restore(step)
     setCrop(null)
     return true
   }
@@ -434,12 +489,13 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       setCrop(null)
       return
     }
-    const before = fullImage()
+    const before = snapshot()
     const piece = imageCtx().getImageData(c.x, c.y, c.w, c.h)
     pushUndo(before, `Recorte ${c.w}×${c.h}`)
     resizeCanvases(c.w, c.h)
     imageCtx().putImageData(piece, 0, 0)
     setOrigin({ x: originRef.current.x + c.x, y: originRef.current.y + c.y })
+    setLayers(layersRef.current.map((l) => ({ ...l, x: l.x - c.x, y: l.y - c.y })))
     setCrop(null)
     fitZoom(c.w, c.h)
     setStatus({ text: `Recortada para ${c.w} × ${c.h} px. As caixas de texto vão ser movidas junto ao salvar.` })
@@ -448,7 +504,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const replaceWith = (bitmap: ImageBitmap, name: string, keepSize: boolean) => {
     const image = imageRef.current
     if (!image) return bitmap.close()
-    const before = fullImage()
+    const before = snapshot()
     const width = keepSize ? image.width : bitmap.width
     const height = keepSize ? image.height : bitmap.height
     pushUndo(before, `Importada: ${name}`)
@@ -473,6 +529,92 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     } catch {
       setStatus({ text: `Não consegui abrir "${file.name}". Use PNG, JPEG ou WebP.`, error: true })
     }
+  }
+
+  const viewCenter = (): Point => {
+    const image = imageRef.current!
+    const vp = viewportRef.current?.getBoundingClientRect()
+    const wrap = wrapRef.current?.getBoundingClientRect()
+    if (!vp || !wrap) return { x: image.width / 2, y: image.height / 2 }
+    return {
+      x: Math.max(0, Math.min(image.width, (vp.left + vp.width / 2 - wrap.left) / zoom)),
+      y: Math.max(0, Math.min(image.height, (vp.top + vp.height / 2 - wrap.top) / zoom)),
+    }
+  }
+
+  const addLayer = async (file: File) => {
+    const image = imageRef.current
+    if (!image) return
+    let bitmap: ImageBitmap
+    try {
+      bitmap = await createImageBitmap(file)
+    } catch {
+      setStatus({ text: `Não consegui abrir "${file.name}". Use PNG, JPEG ou WebP.`, error: true })
+      return
+    }
+    const scale = Math.min(1, image.width / bitmap.width, image.height / bitmap.height)
+    const w = Math.max(1, Math.round(bitmap.width * scale))
+    const h = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = blankCanvas(w, h)
+    ctx2d(canvas).drawImage(bitmap, 0, 0, w, h)
+    bitmap.close()
+    const c = viewCenter()
+    const x = Math.round(Math.max(0, Math.min(image.width - w, c.x - w / 2)))
+    const y = Math.round(Math.max(0, Math.min(image.height - h, c.y - h / 2)))
+    const name = file.name.replace(/\.[^.]+$/, '') || `Camada ${layersRef.current.length + 1}`
+    pushUndo(snapshot(), `Nova camada: ${name}`)
+    const layer: Layer = { id: newLayerId(), name, canvas, x, y, visible: true, opacity: 1 }
+    setLayers([...layersRef.current, layer])
+    setActiveId(layer.id)
+    pickTool('move')
+    setStatus({ text: `Camada "${name}" adicionada (${w} × ${h} px${scale < 1 ? `, reduzida a ${Math.round(scale * 100)}%` : ''}). Arraste com Mover (V).` })
+  }
+
+  const changeLayer = (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'opacity'>>) => setLayers(layersRef.current.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+
+  const duplicateLayer = () => {
+    const l = activeLayer()
+    if (!l) return
+    pushUndo(snapshot(), `Duplicar ${l.name}`)
+    const canvas = blankCanvas(l.canvas.width, l.canvas.height)
+    ctx2d(canvas).drawImage(l.canvas, 0, 0)
+    const copy: Layer = { ...l, id: newLayerId(), name: `${l.name} cópia`, canvas, x: l.x + 12, y: l.y + 12 }
+    const i = layersRef.current.indexOf(l)
+    setLayers([...layersRef.current.slice(0, i + 1), copy, ...layersRef.current.slice(i + 1)])
+    setActiveId(copy.id)
+  }
+
+  const reorderLayer = (dir: 1 | -1) => {
+    const list = [...layersRef.current]
+    const i = list.findIndex((l) => l.id === activeId)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= list.length) return
+    pushUndo(snapshot(), `Ordem das camadas`)
+    ;[list[i], list[j]] = [list[j], list[i]]
+    setLayers(list)
+  }
+
+  const mergeLayer = () => {
+    const l = activeLayer()
+    if (!l) return
+    pushUndo(snapshot(), `Mesclar ${l.name} no Fundo`)
+    const ctx = imageCtx()
+    if (l.visible) {
+      ctx.globalAlpha = l.opacity
+      ctx.drawImage(l.canvas, l.x, l.y)
+      ctx.globalAlpha = 1
+    }
+    setLayers(layersRef.current.filter((x) => x.id !== l.id))
+    setActiveId(FUNDO)
+    setStatus({ text: l.visible ? `"${l.name}" gravada no Fundo. Agora o Pincel e a Caneta mágica agem nela também.` : `"${l.name}" estava oculta e foi descartada.` })
+  }
+
+  const removeLayer = () => {
+    const l = activeLayer()
+    if (!l) return
+    pushUndo(snapshot(), `Excluir ${l.name}`)
+    setLayers(layersRef.current.filter((x) => x.id !== l.id))
+    setActiveId(FUNDO)
   }
 
   const cropHit = (p: Point, c: Rect): string | null => {
@@ -541,11 +683,12 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   }
 
   const save = async () => {
-    const canvas = imageRef.current
-    if (!canvas || !dirty) return
+    const image = imageRef.current
+    if (!image || !dirty || !fundoVisible) return
     setSaving(true)
     setStatus({ text: 'Enviando a base editada…' })
     try {
+      const canvas = layersRef.current.some((l) => l.visible) ? flatten(image, true, layersRef.current) : image
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Não consegui gerar a imagem.'))), mimeOf(page.file), 0.95))
       const r = await reviewApi.saveBase(page.id, blob, originRef.current)
       onSaved(`Base salva (limpa v${r.version}).${r.shiftedLayers ? ` ${r.shiftedLayers} caixas de texto movidas junto com o recorte.` : ''} As caixas de texto vão ser desenhadas por cima numa versão nova.`)
@@ -564,18 +707,28 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     }
   }
 
+  const rawPoint = (e: ReactPointerEvent<HTMLCanvasElement>): Point => {
+    const canvas = maskRef.current!
+    const rect = canvas.getBoundingClientRect()
+    return { x: Math.round(((e.clientX - rect.left) * canvas.width) / rect.width), y: Math.round(((e.clientY - rect.top) * canvas.height) / rect.height) }
+  }
+
   const strokeTo = (from: Point, to: Point) => {
     const onImage = tool === 'imageEraser'
-    const ctx = onImage ? imageCtx() : maskCtx()
-    ctx.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over'
-    ctx.strokeStyle = onImage ? paint : `rgb(${MASK_COLOR.join(',')})`
+    const layer = onImage ? activeLayer() : null
+    const ctx = layer ? ctx2d(layer.canvas) : onImage ? imageCtx() : maskCtx()
+    const ox = layer?.x ?? 0
+    const oy = layer?.y ?? 0
+    ctx.globalCompositeOperation = tool === 'eraser' || layer ? 'destination-out' : 'source-over'
+    ctx.strokeStyle = onImage && !layer ? paint : `rgb(${MASK_COLOR.join(',')})`
     ctx.lineWidth = brush
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.beginPath()
-    ctx.moveTo(from.x, from.y)
-    ctx.lineTo(to.x, to.y)
+    ctx.moveTo(from.x - ox, from.y - oy)
+    ctx.lineTo(to.x - ox, to.y - oy)
     ctx.stroke()
+    ctx.globalCompositeOperation = 'source-over'
   }
 
   const handActive = tool === 'hand' || spaceHeld
@@ -592,6 +745,16 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       return
     }
     const point = toImagePoint(e)
+    if (tool === 'move') {
+      const l = activeLayer()
+      if (!l) {
+        setStatus({ text: 'Selecione uma camada no painel Camadas para mover. O Fundo não se move.', error: true })
+        return
+      }
+      e.currentTarget.setPointerCapture(e.pointerId)
+      moveDrag.current = { start: rawPoint(e), x: l.x, y: l.y, before: snapshot(), moved: false }
+      return
+    }
     if (tool === 'crop') {
       e.currentTarget.setPointerCapture(e.pointerId)
       const hit = crop ? cropHit(point, crop) : null
@@ -625,7 +788,12 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         setStatus({ text: `Cor da borracha: ${hex}` })
         return
       }
-      pushUndo(fullImage(), 'Borracha de imagem')
+      const l = activeLayer()
+      if (l && !l.visible) {
+        setStatus({ text: `A camada "${l.name}" está oculta. Mostre ela (olho) para apagar.`, error: true })
+        return
+      }
+      pushUndo(snapshot(), l ? `Borracha · ${l.name}` : 'Borracha de imagem')
     }
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = point
@@ -644,6 +812,15 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     if (pan.current && vp) {
       vp.scrollLeft = pan.current.left - (e.clientX - pan.current.x)
       vp.scrollTop = pan.current.top - (e.clientY - pan.current.y)
+      return
+    }
+    const md = moveDrag.current
+    if (md) {
+      const p = rawPoint(e)
+      const x = md.x + p.x - md.start.x
+      const y = md.y + p.y - md.start.y
+      md.moved = md.moved || x !== md.x || y !== md.y
+      setLayers(layersRef.current.map((l) => (l.id === activeId ? { ...l, x, y } : l)))
       return
     }
     if (tool === 'crop') {
@@ -666,6 +843,12 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     if (pan.current) {
       pan.current = null
       setPanning(false)
+      return
+    }
+    const md = moveDrag.current
+    if (md) {
+      moveDrag.current = null
+      if (md.moved) pushUndo(md.before, `Mover ${activeLayer()?.name ?? 'camada'}`)
       return
     }
     if (cropDrag.current) {
@@ -708,7 +891,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         zoomTo(1)
       } else if (mod || e.altKey) {
         return
-      } else if (k === 'b') pickTool('brush')
+      } else if (k === 'v') pickTool('move')
+      else if (k === 'b') pickTool('brush')
       else if (k === 'e') pickTool('imageEraser')
       else if (k === 'm') pickTool('eraser')
       else if (k === 'w') pickTool('wand')
@@ -756,6 +940,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const active = TOOLS.find((t) => t.tool === tool)!
   const ext = (page.file.split('.').pop() ?? '').toUpperCase()
   const showBrushCursor = (tool === 'brush' || tool === 'eraser' || tool === 'imageEraser') && !handActive
+  const selectedLayer = layers.find((l) => l.id === activeId) ?? null
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-[#1e1e1e] text-[13px] text-[#d6d6d6]" data-testid="base-editor">
@@ -833,8 +1018,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-1.5 font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!ready || !dirty || saving}
-          title={dirty ? 'Salva a imagem base como uma versão nova e redesenha as caixas de texto por cima' : 'Remova algo antes de salvar'}
+          disabled={!ready || !dirty || saving || !fundoVisible}
+          title={!fundoVisible ? 'Mostre a camada Fundo para salvar' : dirty ? 'Salva a imagem (camadas visíveis juntas) como uma versão nova da base e redesenha as caixas de texto por cima' : 'Faça alguma alteração antes de salvar'}
           onClick={() => void save()}
         >
           {saving && <Spinner className="size-3.5" />} Salvar base
@@ -860,7 +1045,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
           </>
         )}
         {(tool === 'brush' || tool === 'eraser' || tool === 'imageEraser') && <Opt label="Tamanho" value={brush} min={2} max={160} suffix="px" onChange={setBrush} title="Atalhos: [ e ]" wide />}
-        {tool === 'imageEraser' && (
+        {tool === 'imageEraser' && selectedLayer && <span className="whitespace-nowrap text-[#9a9a9a]">Apagando na camada “{selectedLayer.name}”: fica transparente</span>}
+        {tool === 'imageEraser' && !selectedLayer && (
           <>
             <Divider />
             <label className="flex items-center gap-2 whitespace-nowrap" title="Cor usada para apagar. Alt+clique na imagem pega a cor do ponto">
@@ -1014,8 +1200,20 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
             </div>
           )}
           <div className={cx('flex min-h-full min-w-full w-max items-center justify-center p-10', !ready && 'invisible')}>
-            <div ref={wrapRef} className={cx('relative shrink-0 bg-white shadow-[0_0_0_1px_#000,0_10px_40px_rgba(0,0,0,0.6)]', (comparing || crop) && 'overflow-hidden')} style={size ? { width: size.width * zoom, height: size.height * zoom } : undefined}>
-              <canvas ref={imageRef} className="absolute inset-0 h-full w-full" style={{ imageRendering: zoom >= 2 ? 'pixelated' : 'auto' }} />
+            <div
+              ref={wrapRef}
+              className={cx('relative shrink-0 overflow-hidden shadow-[0_0_0_1px_#000,0_10px_40px_rgba(0,0,0,0.6)]', fundoVisible ? 'bg-white' : 'bg-[repeating-conic-gradient(#d4d4d4_0_25%,#ffffff_0_50%)] bg-[length:16px_16px]')}
+              style={size ? { width: size.width * zoom, height: size.height * zoom } : undefined}
+            >
+              <canvas ref={imageRef} className={cx('absolute inset-0 h-full w-full', !fundoVisible && 'invisible')} style={{ imageRendering: zoom >= 2 ? 'pixelated' : 'auto' }} />
+              {layers.map((l) => (
+                <div
+                  key={l.id}
+                  ref={(el) => mountCanvas(el, l.canvas)}
+                  className={cx('pointer-events-none absolute', (!l.visible || comparing) && 'invisible')}
+                  style={{ left: l.x * zoom, top: l.y * zoom, width: l.canvas.width * zoom, height: l.canvas.height * zoom, opacity: l.opacity, imageRendering: zoom >= 2 ? 'pixelated' : 'auto' }}
+                />
+              ))}
               {comparing && sourceUrl && sourceSize && (
                 <img src={sourceUrl} alt="" className="pointer-events-none absolute max-w-none" style={{ left: -origin.x * zoom, top: -origin.y * zoom, width: sourceSize.width * zoom, height: sourceSize.height * zoom }} />
               )}
@@ -1024,7 +1222,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                 className={cx(
                   'absolute inset-0 h-full w-full touch-none opacity-55',
                   comparing && 'invisible',
-                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' ? 'cursor-crosshair' : tool === 'crop' ? '' : 'cursor-none',
+                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' ? 'cursor-crosshair' : tool === 'move' ? 'cursor-move' : tool === 'crop' ? '' : 'cursor-none',
                 )}
                 style={tool === 'crop' && !handActive ? { cursor: cropCursor } : undefined}
                 onPointerDown={onPointerDown}
@@ -1042,6 +1240,12 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                   ref={cursorRef}
                   className="pointer-events-none absolute left-0 top-0 hidden rounded-full border border-white mix-blend-difference"
                   style={{ width: cursorSize, height: cursorSize, marginLeft: -cursorSize / 2, marginTop: -cursorSize / 2 }}
+                />
+              )}
+              {selectedLayer && selectedLayer.visible && !comparing && (
+                <div
+                  className="pointer-events-none absolute outline outline-1 outline-offset-0 outline-sky-400 [outline-style:dashed]"
+                  style={{ left: selectedLayer.x * zoom, top: selectedLayer.y * zoom, width: selectedLayer.canvas.width * zoom, height: selectedLayer.canvas.height * zoom }}
                 />
               )}
               {crop && crop.w > 0 && crop.h > 0 && (
@@ -1069,6 +1273,38 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         </div>
 
         <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-[#111] bg-[#2b2b2b] lg:flex">
+          <section className="border-b border-[#1a1a1a]">
+            <header className="flex items-center justify-between bg-[#323232] px-3 py-1.5">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[#c4c4c4]">Camadas</h3>
+              <span className="text-[10px] text-[#888]">{layers.length + 1}</span>
+            </header>
+            <LayersPanel
+              layers={layers}
+              activeId={activeId}
+              base={() => imageRef.current}
+              baseVisible={fundoVisible}
+              disabled={!ready || saving}
+              onSelect={setActiveId}
+              onToggleBase={() => setFundoVisible(!fundoVisible)}
+              onChange={changeLayer}
+              onAdd={() => layerFileRef.current?.click()}
+              onDuplicate={duplicateLayer}
+              onMove={reorderLayer}
+              onMerge={mergeLayer}
+              onRemove={removeLayer}
+            />
+            <input
+              ref={layerFileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) void addLayer(file)
+              }}
+            />
+          </section>
           <Panel title="Remoção">
             <div className="space-y-3 text-xs">
               <label className="flex items-center justify-between gap-2">
