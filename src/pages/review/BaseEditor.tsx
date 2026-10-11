@@ -125,7 +125,7 @@ const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 
 
 const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
   { tool: 'brush', label: 'Pincel', key: 'B', hint: 'Pinte por cima do que quer remover' },
-  { tool: 'eraser', label: 'Borracha', key: 'E', hint: 'Apaga partes da máscara pintada' },
+  { tool: 'eraser', label: 'Borracha de máscara', key: 'E', hint: 'Tira o vermelho onde a máscara passou do ponto; não apaga a imagem (para isso, pinte com o Pincel e clique em Remover)' },
   { tool: 'wand', label: 'Caneta mágica', key: 'W', hint: 'Clique na parte clara de um balão: marca só as letras dele' },
   { tool: 'crop', label: 'Recorte', key: 'R', hint: 'Arraste para escolher a área que fica; o resto da imagem é cortado (Enter aplica)' },
   { tool: 'hand', label: 'Mão', key: 'H', hint: 'Arraste para mover a imagem (ou segure Espaço)' },
@@ -584,6 +584,10 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       return
     }
     if (tool === 'brush') maskSource.current = 'Pincel'
+    if (tool === 'eraser' && !maskPixels) {
+      setStatus({ text: 'A borracha só apaga a máscara vermelha. Para apagar algo da imagem, pinte com o Pincel (B) e clique em Remover (Enter).', error: true })
+      return
+    }
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = point
     strokeTo(point, point)
