@@ -254,7 +254,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                 </span>
                 <span className="w-36 text-xs text-slate-500">
                   {w.createdBy}
-                  <span className="block">{ago(w.createdAt)}</span>
+                  <span className="block" title={`Criado ${when(w.createdAt)}`}>{w.finishedAt ? `terminou ${ago(w.finishedAt)}` : ago(w.createdAt)}</span>
                   {w.finishedAt && (
                     <span className="block" title={w.startedAt ? `Esperou ${duration(new Date(w.startedAt).getTime() - new Date(w.createdAt).getTime())} na fila antes de começar` : undefined}>
                       executado em {duration(new Date(w.finishedAt).getTime() - new Date(w.startedAt ?? w.createdAt).getTime())}
