@@ -120,11 +120,11 @@ export function ProcessingPage() {
   const sys = me?.role === 'system_admin'
   const d = info.data
 
-  const toggleClean = async (on: boolean) => {
+  const toggle = async (save: () => Promise<unknown>, message: string) => {
     setBusy(true)
     try {
-      await workflowsApi.setCleanOnScan(on)
-      toast('done', on ? 'As páginas serão limpas logo depois de escanear.' : 'As páginas serão limpas enquanto o capítulo espera a tradução.')
+      await save()
+      toast('done', message)
       await info.reload()
     } catch (err) {
       toast('failed', err instanceof Error ? err.message : String(err))
@@ -156,11 +156,29 @@ export function ProcessingPage() {
           {!sys && <p className="text-xs text-slate-500">Só o Admin do sistema altera.</p>}
           <Card className="space-y-2 p-4">
             <label className="flex items-start gap-3">
-              <input type="checkbox" className="mt-1 accent-brand" checked={d.cleanOnScan} disabled={!sys || busy} onChange={(e) => toggleClean(e.target.checked)} data-testid="clean-on-scan" />
+              <input type="checkbox" className="mt-1 accent-brand" checked={d.cleanOnScan} disabled={!sys || busy} onChange={(e) => toggle(() => workflowsApi.setCleanOnScan(e.target.checked), e.target.checked ? 'As páginas serão limpas logo depois de escanear.' : 'As páginas serão limpas enquanto o capítulo espera a tradução.')} data-testid="clean-on-scan" />
               <span>
                 <span className="block font-semibold">Limpar as páginas logo depois de escanear</span>
                 <span className="block text-sm text-slate-500">
                   Por padrão, as páginas são limpas (texto apagado) enquanto o capítulo espera a tradução (Anthropic ou Gemma), só quando ele vai ser traduzido. Ligue se a scan sempre traduz tudo o que escaneia: a tradução fica pronta mais rápido, mas o escaneamento usa mais CPU.
+                </span>
+              </span>
+            </label>
+          </Card>
+          <Card className="space-y-2 p-4">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 accent-brand"
+                checked={d.countGpuWaiting}
+                disabled={!sys || busy}
+                onChange={(e) => toggle(() => workflowsApi.setCountGpuWaiting(e.target.checked), e.target.checked ? 'Capítulos esperando a GPU passam a contar no limite da fila de processamento.' : 'Capítulos esperando a GPU não contam mais no limite da fila de processamento.')}
+                data-testid="count-gpu-waiting"
+              />
+              <span>
+                <span className="block font-semibold">Contar os capítulos esperando a GPU no limite da fila de processamento</span>
+                <span className="block text-sm text-slate-500">
+                  Na tradução pelo Gemma, o capítulo envia os lotes para a GPU e libera o worker enquanto espera. Ligado, um capítulo novo só começa a traduzir se os que estão rodando mais os que estão esperando a GPU couberem no limite da fila de processamento ({num(d.workerConcurrency)}); os demais ficam na fila e tentam de novo a cada 20 segundos. Assim a GPU nunca recebe mais capítulos do que esse limite. Desligado, a GPU pode receber muitos capítulos de uma vez. Não vale para a tradução pela Anthropic.
                 </span>
               </span>
             </label>

@@ -288,6 +288,7 @@ export interface GpuStatus {
 export interface Processing {
   workerConcurrency: number
   cleanOnScan: boolean
+  countGpuWaiting: boolean
   min: number
   max: number
   queue: QueueCounts
@@ -401,6 +402,7 @@ export const workflowsApi = {
   gpu: () => request<GpuStatus>('/settings/processing/gpu'),
   setGpu: (input: { enabled?: boolean; url?: string; translate?: boolean }) => put<GpuStatus>('/settings/processing/gpu', input),
   setCleanOnScan: (cleanOnScan: boolean) => put<{ cleanOnScan: boolean }>('/settings/processing', { cleanOnScan }),
+  setCountGpuWaiting: (countGpuWaiting: boolean) => put<{ countGpuWaiting: boolean }>('/settings/processing', { countGpuWaiting }),
   notifications: (unread = false) => request<AppNotification[]>(`/notifications${unread ? '?unread=1' : ''}`),
   readNotifications: (ids?: string[]) => post<{ updated: number }>('/notifications/read', { ids }),
 }
