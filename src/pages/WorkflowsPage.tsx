@@ -4,7 +4,7 @@ import { Pagination } from '../components/Pagination'
 import { useConfirm } from '../components/confirm'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Notice, Spinner, Tabs, type Tone } from '../components/ui'
-import { ago, chaptersLabel, num, approxUsd, when } from '../lib/format'
+import { ago, chaptersLabel, duration, num, approxUsd, when } from '../lib/format'
 import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
 import { WF_STATUS } from '../lib/workflowStatus'
@@ -255,6 +255,11 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                 <span className="w-36 text-xs text-slate-500">
                   {w.createdBy}
                   <span className="block">{ago(w.createdAt)}</span>
+                  {w.finishedAt && (
+                    <span className="block" title={w.startedAt ? `Esperou ${duration(new Date(w.startedAt).getTime() - new Date(w.createdAt).getTime())} na fila antes de começar` : undefined}>
+                      executado em {duration(new Date(w.finishedAt).getTime() - new Date(w.startedAt ?? w.createdAt).getTime())}
+                    </span>
+                  )}
                 </span>
                 <Badge tone={WF_STATUS[w.status].tone}>{WF_STATUS[w.status].label}</Badge>
               </a>

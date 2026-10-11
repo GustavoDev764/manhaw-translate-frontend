@@ -157,6 +157,7 @@ export interface WorkflowRow {
   scan: string
   createdBy: string
   createdAt: string
+  startedAt?: string | null
   finishedAt: string | null
   chapters: number[]
   items: number
