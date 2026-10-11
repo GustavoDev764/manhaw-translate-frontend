@@ -1,38 +1,187 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useConfirm } from '../../components/confirm'
-import { Button, Spinner } from '../../components/ui'
+import { Spinner } from '../../components/ui'
 import { cx } from '../../lib/cx'
 import { applyRemoval, magicWand, maskPixelCount, MASK_COLOR, METHOD_LABEL, WandError, type Method } from '../../lib/opencv/inpaint'
 import { loadOpenCv, type CV } from '../../lib/opencv/opencv'
 import { reviewApi, type ReviewPage } from '../../reviewApi'
 
-type Tool = 'brush' | 'eraser' | 'wand'
+type Tool = 'brush' | 'eraser' | 'wand' | 'hand'
 type Point = { x: number; y: number }
+type Step = { before: ImageData; label: string }
 
 const HISTORY_LIMIT = 8
+const MIN_ZOOM = 0.05
+const MAX_ZOOM = 8
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
-const TOOLS: [Tool, string, string, string][] = [
-  ['brush', 'Pincel', 'B', 'Pinte por cima do que quer remover'],
-  ['eraser', 'Borracha', 'E', 'Apaga partes da máscara pintada'],
-  ['wand', 'Caneta mágica', 'W', 'Clique na parte clara de um balão: marca só as letras dele'],
-]
 
 const mimeOf = (file: string) => MIME[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'image/png'
+const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
 
-function Slider({ label, value, min, max, step = 1, suffix = '', disabled, onChange, title }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; disabled?: boolean; onChange: (v: number) => void; title?: string }) {
+function Svg({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <label className={cx('block space-y-1 text-xs', disabled && 'opacity-50')} title={title}>
-      <span className="flex justify-between gap-2">
-        <span>{label}</span>
-        <span className="tabular-nums text-slate-400">
-          {value}
-          {suffix}
-        </span>
+    <svg viewBox="0 0 24 24" className={cx('size-[18px]', className)} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {children}
+    </svg>
+  )
+}
+
+const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 'fit', ReactNode> = {
+  brush: (
+    <>
+      <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
+      <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
+    </>
+  ),
+  eraser: (
+    <>
+      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+      <path d="M22 21H7" />
+      <path d="m5 11 9 9" />
+    </>
+  ),
+  wand: (
+    <>
+      <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+      <path d="m14 7 3 3" />
+      <path d="M5 6v4" />
+      <path d="M19 14v4" />
+      <path d="M10 2v2" />
+      <path d="M7 8H3" />
+      <path d="M21 16h-4" />
+      <path d="M11 3H9" />
+    </>
+  ),
+  hand: (
+    <>
+      <path d="M18 11V6a2 2 0 0 0-4 0" />
+      <path d="M14 10V4a2 2 0 0 0-4 0v2" />
+      <path d="M10 10.5V6a2 2 0 0 0-4 0v8" />
+      <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+    </>
+  ),
+  compare: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M12 3v18" />
+    </>
+  ),
+  undo: (
+    <>
+      <path d="M3 7v6h6" />
+      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </>
+  ),
+  redo: (
+    <>
+      <path d="M21 7v6h-6" />
+      <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+    </>
+  ),
+  zoomIn: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+      <path d="M11 8v6" />
+      <path d="M8 11h6" />
+    </>
+  ),
+  zoomOut: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+      <path d="M8 11h6" />
+    </>
+  ),
+  fit: (
+    <>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+      <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </>
+  ),
+}
+
+const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
+  { tool: 'brush', label: 'Pincel', key: 'B', hint: 'Pinte por cima do que quer remover' },
+  { tool: 'eraser', label: 'Borracha', key: 'E', hint: 'Apaga partes da máscara pintada' },
+  { tool: 'wand', label: 'Caneta mágica', key: 'W', hint: 'Clique na parte clara de um balão: marca só as letras dele' },
+  { tool: 'hand', label: 'Mão', key: 'H', hint: 'Arraste para mover a imagem (ou segure Espaço)' },
+]
+
+const SHORTCUTS: [string, string][] = [
+  ['B / E / W / H', 'Pincel, borracha, caneta, mão'],
+  ['[ e ]', 'Diminuir / aumentar pincel'],
+  ['Enter', 'Remover a máscara'],
+  ['Esc', 'Limpar a máscara'],
+  ['Ctrl+Z / Ctrl+Y', 'Desfazer / refazer'],
+  ['Espaço', 'Mover a imagem'],
+  ['Ctrl+roda, Ctrl + / −', 'Zoom'],
+  ['Ctrl+0 / Ctrl+1', 'Ajustar / 100%'],
+  ['C (segure)', 'Comparar com a base atual'],
+]
+
+function IconButton({ icon, label, active, disabled, onClick, className, ...rest }: { icon: ReactNode; label: string; active?: boolean; disabled?: boolean; onClick?: () => void; className?: string } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'>) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cx(
+        'grid size-9 place-items-center rounded-md transition',
+        active ? 'bg-[#4b4b4b] text-white shadow-[inset_0_0_0_1px_#6b6b6b]' : 'text-[#c8c8c8] hover:bg-[#3a3a3a] hover:text-white',
+        'disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent',
+        className,
+      )}
+      {...rest}
+    >
+      <Svg>{icon}</Svg>
+    </button>
+  )
+}
+
+function Opt({ label, value, min, max, step = 1, suffix, disabled, onChange, title, wide }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; disabled?: boolean; onChange: (v: number) => void; title?: string; wide?: boolean }) {
+  return (
+    <label className={cx('flex items-center gap-2 whitespace-nowrap', disabled && 'opacity-40')} title={title}>
+      <span className="text-[#a8a8a8]">{label}</span>
+      <input type="range" className={cx('accent-brand', wide ? 'w-32' : 'w-24')} min={min} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
+      <span className="flex items-center rounded border border-[#3f3f3f] bg-[#1d1d1d]">
+        <input
+          type="number"
+          className="w-10 bg-transparent px-1 py-0.5 text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => {
+            const v = Number(e.target.value)
+            if (Number.isFinite(v)) onChange(Math.max(min, Math.min(max, v)))
+          }}
+        />
+        {suffix && <span className="pr-1.5 text-[#8a8a8a]">{suffix}</span>}
       </span>
-      <input type="range" className="w-full accent-brand" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
     </label>
   )
 }
+
+function Panel({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
+  return (
+    <section className="border-b border-[#1a1a1a]">
+      <header className="flex items-center justify-between bg-[#323232] px-3 py-1.5">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[#c4c4c4]">{title}</h3>
+        {right}
+      </header>
+      <div className="p-3">{children}</div>
+    </section>
+  )
+}
+
+const Divider = () => <span className="mx-1 h-6 w-px bg-[#3f3f3f]" />
 
 export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClose: () => void; onSaved: (message: string) => void }) {
   const [cv, setCv] = useState<CV | null>(null)
@@ -40,6 +189,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [size, setSize] = useState<{ width: number; height: number } | null>(null)
   const [sourceUrl, setSourceUrl] = useState<string | null>(null)
   const [tool, setTool] = useState<Tool>('brush')
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const [panning, setPanning] = useState(false)
   const [brush, setBrush] = useState(24)
   const [method, setMethod] = useState<Method>('auto')
   const [radius, setRadius] = useState(5)
@@ -51,25 +202,44 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [zoom, setZoom] = useState(1)
   const [comparing, setComparing] = useState(false)
   const [maskPixels, setMaskPixels] = useState(0)
-  const [history, setHistory] = useState({ undo: 0, redo: 0 })
+  const [history, setHistory] = useState<{ done: string[]; undone: string[]; dropped: boolean }>({ done: [], undone: [], dropped: false })
   const [status, setStatus] = useState<{ text: string; error?: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showKeys, setShowKeys] = useState(false)
   const [ask, confirmDialog] = useConfirm()
   const imageRef = useRef<HTMLCanvasElement>(null)
   const maskRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const cursorRef = useRef<HTMLDivElement>(null)
-  const undoStack = useRef<ImageData[]>([])
-  const redoStack = useRef<ImageData[]>([])
+  const coordsRef = useRef<HTMLSpanElement>(null)
+  const undoStack = useRef<Step[]>([])
+  const redoStack = useRef<Step[]>([])
+  const dropped = useRef(false)
   const drawing = useRef<Point | null>(null)
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const maskSource = useRef('Pincel')
+  const anchor = useRef<{ px: number; py: number; cx: number; cy: number } | null>(null)
   const keys = useRef<(e: KeyboardEvent) => void>(() => undefined)
+  const wheel = useRef<(e: WheelEvent) => void>(() => undefined)
 
   const imageCtx = () => imageRef.current!.getContext('2d', { willReadFrequently: true })!
   const maskCtx = () => maskRef.current!.getContext('2d', { willReadFrequently: true })!
 
-  const fitZoom = useCallback((width: number) => {
-    const available = (viewportRef.current?.clientWidth ?? width) - 48
-    setZoom(Math.max(0.1, Math.min(1, available / width)))
+  const fitZoom = useCallback((width: number, height: number) => {
+    const vp = viewportRef.current
+    const w = (vp?.clientWidth ?? width) - 80
+    const h = (vp?.clientHeight ?? height) - 80
+    const fit = height > width * 2 ? w / width : Math.min(w / width, h / height)
+    setZoom(clampZoom(Math.min(1, fit)))
+  }, [])
+
+  useEffect(() => {
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previous
+    }
   }, [])
 
   useEffect(() => {
@@ -87,7 +257,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         url = URL.createObjectURL(blob)
         setSourceUrl(url)
         setSize({ width: image.width, height: image.height })
-        fitZoom(image.width)
+        fitZoom(image.width, image.height)
         setCv(cv)
       })
       .catch((err: unknown) => {
@@ -99,16 +269,43 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     }
   }, [page.id, fitZoom])
 
-  const syncHistory = () => setHistory({ undo: undoStack.current.length, redo: redoStack.current.length })
+  useLayoutEffect(() => {
+    const a = anchor.current
+    const wrap = wrapRef.current
+    const vp = viewportRef.current
+    if (!a || !wrap || !vp) return
+    anchor.current = null
+    const r = wrap.getBoundingClientRect()
+    vp.scrollLeft += r.left + a.px * zoom - a.cx
+    vp.scrollTop += r.top + a.py * zoom - a.cy
+  }, [zoom])
+
+  const zoomTo = (next: number, clientX?: number, clientY?: number) => {
+    const wrap = wrapRef.current
+    const vp = viewportRef.current
+    if (!wrap || !vp) return setZoom(clampZoom(next))
+    const box = vp.getBoundingClientRect()
+    const cx = clientX ?? box.left + box.width / 2
+    const cy = clientY ?? box.top + box.height / 2
+    const r = wrap.getBoundingClientRect()
+    anchor.current = { px: (cx - r.left) / zoom, py: (cy - r.top) / zoom, cx, cy }
+    setZoom(clampZoom(next))
+  }
+
+  const syncHistory = () =>
+    setHistory({ done: undoStack.current.map((s) => s.label), undone: redoStack.current.map((s) => s.label).reverse(), dropped: dropped.current })
 
   const fullImage = () => {
     const canvas = imageRef.current!
     return imageCtx().getImageData(0, 0, canvas.width, canvas.height)
   }
 
-  const pushUndo = (before: ImageData) => {
-    undoStack.current.push(before)
-    if (undoStack.current.length > HISTORY_LIMIT) undoStack.current.shift()
+  const pushUndo = (before: ImageData, label: string) => {
+    undoStack.current.push({ before, label })
+    if (undoStack.current.length > HISTORY_LIMIT) {
+      undoStack.current.shift()
+      dropped.current = true
+    }
     redoStack.current = []
     syncHistory()
   }
@@ -132,28 +329,36 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       setStatus({ text: 'Pinte uma máscara (ou use a caneta mágica) antes de remover.', error: true })
       return
     }
-    pushUndo(before)
+    pushUndo(before, `${maskSource.current} · ${METHOD_LABEL[method]}`)
     clearMask()
     setStatus({ text: `${METHOD_LABEL[method]}${method === 'fill' ? '' : ` · raio ${radius}`} · ${result.pixels.toLocaleString('pt-BR')} px removidos em ${result.ms.toFixed(0)} ms` })
   }
 
+  const swap = (from: Step[], to: Step[]) => {
+    const step = from.pop()
+    if (!step || !imageRef.current) return false
+    to.push({ before: fullImage(), label: step.label })
+    imageCtx().putImageData(step.before, 0, 0)
+    return true
+  }
+
   const undo = () => {
-    const previous = undoStack.current.pop()
-    if (!previous || !imageRef.current) return
-    redoStack.current.push(fullImage())
-    imageCtx().putImageData(previous, 0, 0)
-    syncHistory()
+    if (swap(undoStack.current, redoStack.current)) syncHistory()
   }
 
   const redo = () => {
-    const next = redoStack.current.pop()
-    if (!next || !imageRef.current) return
-    undoStack.current.push(fullImage())
-    imageCtx().putImageData(next, 0, 0)
+    if (swap(redoStack.current, undoStack.current)) syncHistory()
+  }
+
+  const jumpTo = (done: number) => {
+    while (undoStack.current.length !== done) {
+      const moved = undoStack.current.length > done ? swap(undoStack.current, redoStack.current) : swap(redoStack.current, undoStack.current)
+      if (!moved) break
+    }
     syncHistory()
   }
 
-  const dirty = history.undo > 0
+  const dirty = history.done.length > 0
 
   const close = async () => {
     if (saving) return
@@ -198,12 +403,24 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     ctx.stroke()
   }
 
+  const handActive = tool === 'hand' || spaceHeld
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0 || !cv || !imageRef.current || !maskRef.current || saving) return
+    if ((e.button !== 0 && e.button !== 1) || !cv || !imageRef.current || !maskRef.current || saving) return
+    if (handActive || e.button === 1) {
+      const vp = viewportRef.current
+      if (!vp) return
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      pan.current = { x: e.clientX, y: e.clientY, left: vp.scrollLeft, top: vp.scrollTop }
+      setPanning(true)
+      return
+    }
     const point = toImagePoint(e)
     if (tool === 'wand') {
       try {
         const result = magicWand(cv, imageRef.current, maskRef.current, point.x, point.y, { threshold, closeSize: wandClose, dilate: wandDilate })
+        maskSource.current = 'Caneta mágica'
         refreshMaskCount()
         setStatus({ text: `Caneta mágica: ${result.pixels.toLocaleString('pt-BR')} px de texto em ${result.ms.toFixed(0)} ms` })
         if (autoApply) apply()
@@ -213,6 +430,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       }
       return
     }
+    if (tool === 'brush') maskSource.current = 'Pincel'
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = point
     strokeTo(point, point)
@@ -220,9 +438,17 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const cursor = cursorRef.current
-    if (cursor) {
-      const rect = e.currentTarget.getBoundingClientRect()
-      cursor.style.transform = `translate(${e.clientX - rect.left}px, ${e.clientY - rect.top}px)`
+    const rect = e.currentTarget.getBoundingClientRect()
+    if (cursor) cursor.style.transform = `translate(${e.clientX - rect.left}px, ${e.clientY - rect.top}px)`
+    if (coordsRef.current && maskRef.current) {
+      const p = toImagePoint(e)
+      coordsRef.current.textContent = `X ${p.x} · Y ${p.y}`
+    }
+    const vp = viewportRef.current
+    if (pan.current && vp) {
+      vp.scrollLeft = pan.current.left - (e.clientX - pan.current.x)
+      vp.scrollTop = pan.current.top - (e.clientY - pan.current.y)
+      return
     }
     if (!drawing.current) return
     const point = toImagePoint(e)
@@ -231,6 +457,11 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   }
 
   const onPointerUp = () => {
+    if (pan.current) {
+      pan.current = null
+      setPanning(false)
+      return
+    }
     if (!drawing.current) return
     drawing.current = null
     refreshMaskCount()
@@ -242,182 +473,319 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       e.stopPropagation()
       if ((e.target as HTMLElement).closest('input, textarea, select')) return
       const k = e.key.toLowerCase()
-      if ((e.ctrlKey || e.metaKey) && ((k === 'z' && e.shiftKey) || k === 'y')) {
+      const mod = e.ctrlKey || e.metaKey
+      if (k === ' ') {
+        e.preventDefault()
+        if (!e.repeat) setSpaceHeld(true)
+      } else if (mod && ((k === 'z' && e.shiftKey) || k === 'y')) {
         e.preventDefault()
         redo()
-      } else if ((e.ctrlKey || e.metaKey) && k === 'z') {
+      } else if (mod && k === 'z') {
         e.preventDefault()
         undo()
-      } else if (e.ctrlKey || e.metaKey || e.altKey) {
+      } else if (mod && (k === '=' || k === '+')) {
+        e.preventDefault()
+        zoomTo(zoom * 1.25)
+      } else if (mod && k === '-') {
+        e.preventDefault()
+        zoomTo(zoom / 1.25)
+      } else if (mod && k === '0') {
+        e.preventDefault()
+        if (size) fitZoom(size.width, size.height)
+      } else if (mod && k === '1') {
+        e.preventDefault()
+        zoomTo(1)
+      } else if (mod || e.altKey) {
         return
       } else if (k === 'b') setTool('brush')
       else if (k === 'e') setTool('eraser')
       else if (k === 'w') setTool('wand')
+      else if (k === 'h') setTool('hand')
       else if (k === '[') setBrush((b) => Math.max(2, b - 4))
       else if (k === ']') setBrush((b) => Math.min(160, b + 4))
       else if (k === 'enter') apply()
       else if (k === 'escape' || k === 'delete') clearMask()
       else if (k === 'c' && !e.repeat) setComparing(true)
     }
+    wheel.current = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      zoomTo(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY)
+    }
   })
 
   useEffect(() => {
+    const vp = viewportRef.current
     const down = (e: KeyboardEvent) => keys.current(e)
     const up = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === 'c') setComparing(false)
+      const k = e.key.toLowerCase()
+      if (k === 'c') setComparing(false)
+      if (k === ' ') setSpaceHeld(false)
     }
+    const onWheel = (e: WheelEvent) => wheel.current(e)
     window.addEventListener('keydown', down, true)
     window.addEventListener('keyup', up)
+    vp?.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       window.removeEventListener('keydown', down, true)
       window.removeEventListener('keyup', up)
+      vp?.removeEventListener('wheel', onWheel)
     }
   }, [])
 
   const ready = !!cv && !!size
   const cursorSize = brush * zoom
+  const active = TOOLS.find((t) => t.tool === tool)!
+  const ext = (page.file.split('.').pop() ?? '').toUpperCase()
+  const showBrushCursor = (tool === 'brush' || tool === 'eraser') && !handActive
 
-  return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-slate-950 text-slate-100" data-testid="base-editor">
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex select-none flex-col bg-[#1e1e1e] text-[13px] text-[#d6d6d6]" data-testid="base-editor">
       {confirmDialog}
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-2">
-        <h2 className="text-base font-semibold">
-          Edição de base <span className="font-normal text-slate-400">· página {page.position}</span>
-        </h2>
-        <span className="text-xs text-slate-400">roda no seu navegador com OpenCV: não usa CPU nem GPU do servidor</span>
-        <span className="ml-auto flex gap-2">
-          <Button size="sm" variant="ghost" className="text-slate-300 hover:bg-slate-800" disabled={saving} onClick={() => void close()}>
-            Cancelar
-          </Button>
-          <Button size="sm" variant="primary" disabled={!ready || !dirty || saving} title={dirty ? 'Salva a imagem base como uma versão nova e redesenha as caixas de texto por cima' : 'Remova algo antes de salvar'} onClick={() => void save()}>
-            {saving && <Spinner className="size-3" />} Salvar base
-          </Button>
+
+      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-[#111] bg-[#252525] px-3">
+        <span className="grid size-7 place-items-center rounded-md bg-brand text-white">
+          <Svg className="size-4">{ICONS.wand}</Svg>
         </span>
+        <div className="min-w-0 leading-tight">
+          <div className="font-semibold text-white">
+            Edição de base{dirty && <span className="text-brand"> •</span>}
+          </div>
+          <div className="truncate text-[11px] text-[#9a9a9a]">
+            {page.series.title} › Cap. {page.chapter.number} › Página {page.position}
+          </div>
+        </div>
+        <span className="ml-auto hidden items-center gap-1.5 rounded-full border border-[#3a3a3a] bg-[#1d1d1d] px-2.5 py-1 text-[11px] text-[#a8a8a8] md:flex" title="Todo o processamento roda neste navegador com OpenCV.js; o servidor só recebe a imagem pronta">
+          <span className="size-1.5 rounded-full bg-done" /> OpenCV local · sem custo de CPU/GPU no servidor
+        </span>
+        <button type="button" className="rounded-md px-3 py-1.5 text-[#c8c8c8] hover:bg-[#3a3a3a] hover:text-white disabled:opacity-40" disabled={saving} onClick={() => void close()}>
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-1.5 font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!ready || !dirty || saving}
+          title={dirty ? 'Salva a imagem base como uma versão nova e redesenha as caixas de texto por cima' : 'Remova algo antes de salvar'}
+          onClick={() => void save()}
+        >
+          {saving && <Spinner className="size-3.5" />} Salvar base
+        </button>
+      </div>
+
+      <div className="flex h-10 shrink-0 items-center gap-3 overflow-x-auto border-b border-[#111] bg-[#2b2b2b] px-3 text-xs">
+        <span className="flex items-center gap-2 font-medium text-white">
+          <Svg className="size-4">{ICONS[tool]}</Svg>
+          {active.label}
+        </span>
+        <Divider />
+        {(tool === 'brush' || tool === 'eraser') && <Opt label="Tamanho" value={brush} min={2} max={160} suffix="px" onChange={setBrush} title="Atalhos: [ e ]" wide />}
+        {tool === 'wand' && (
+          <>
+            <Opt label="Limiar do branco" value={threshold} min={60} max={250} onChange={setThreshold} title="Quanto mais alto, mais clara a área precisa ser para contar como fundo do balão" />
+            <Opt label="Expandir texto" value={wandDilate} min={0} max={10} suffix="px" onChange={setWandDilate} />
+            <Opt label="Fechar letras na borda" value={wandClose} min={0} max={30} onChange={setWandClose} title="Use quando letras encostadas no contorno do balão ficam de fora" />
+            <label className="flex items-center gap-1.5 whitespace-nowrap text-[#c8c8c8]">
+              <input type="checkbox" className="accent-brand" checked={autoApply} onChange={(e) => setAutoApply(e.target.checked)} /> Remover ao clicar
+            </label>
+          </>
+        )}
+        {tool === 'hand' && <span className="text-[#9a9a9a]">Arraste para mover a imagem. Ctrl+roda do mouse para zoom.</span>}
+        <span className="ml-auto truncate text-[#9a9a9a]">{active.hint}</span>
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-64 shrink-0 space-y-4 overflow-y-auto border-r border-slate-800 p-3 text-sm">
-          <div className="space-y-1.5">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Ferramenta</div>
-            <div className="grid gap-1" role="radiogroup" aria-label="Ferramenta">
-              {TOOLS.map(([t, label, key, hint]) => (
-                <Button key={t} size="sm" role="radio" aria-checked={tool === t} variant={tool === t ? 'primary' : 'ghost'} className={cx('justify-between', tool !== t && 'text-slate-300 hover:bg-slate-800')} title={hint} onClick={() => setTool(t)}>
-                  {label} <kbd className="text-[10px] opacity-70">{key}</kbd>
-                </Button>
-              ))}
-            </div>
-          </div>
+        <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-[#111] bg-[#2b2b2b] py-2" aria-label="Ferramentas">
+          {TOOLS.map((t) => (
+            <IconButton key={t.tool} icon={ICONS[t.tool]} label={`${t.label} (${t.key})`} active={tool === t.tool} onClick={() => setTool(t.tool)} />
+          ))}
+          <span className="my-1 h-px w-7 bg-[#3f3f3f]" />
+          <IconButton
+            icon={ICONS.compare}
+            label="Comparar com a base atual (segure, ou segure C)"
+            active={comparing}
+            disabled={!ready}
+            onPointerDown={() => setComparing(true)}
+            onPointerUp={() => setComparing(false)}
+            onPointerLeave={() => setComparing(false)}
+          />
+          <span className="my-1 h-px w-7 bg-[#3f3f3f]" />
+          <IconButton icon={ICONS.undo} label="Desfazer (Ctrl+Z)" disabled={!history.done.length} onClick={undo} />
+          <IconButton icon={ICONS.redo} label="Refazer (Ctrl+Y)" disabled={!history.undone.length} onClick={redo} />
+          <span className="mt-auto flex size-7 items-center justify-center rounded border border-[#555] text-[10px]" style={{ background: `rgb(${MASK_COLOR.join(',')})` }} title="Cor da máscara" />
+        </nav>
 
-          {tool !== 'wand' ? (
-            <Slider label="Tamanho do pincel" value={brush} min={2} max={160} suffix=" px" onChange={setBrush} title="Atalhos: [ e ]" />
-          ) : (
-            <div className="space-y-3">
-              <Slider label="Limiar do branco" value={threshold} min={60} max={250} onChange={setThreshold} title="Quanto mais alto, mais clara a área precisa ser para contar como fundo do balão" />
-              <Slider label="Expandir texto" value={wandDilate} min={0} max={10} suffix=" px" onChange={setWandDilate} />
-              <Slider label="Fechar letras na borda" value={wandClose} min={0} max={30} onChange={setWandClose} title="Use quando letras encostadas no contorno do balão ficam de fora" />
-              <label className="flex items-center gap-2 text-xs">
-                <input type="checkbox" className="accent-brand" checked={autoApply} onChange={(e) => setAutoApply(e.target.checked)} /> Remover ao clicar
-              </label>
-            </div>
-          )}
-
-          <div className="space-y-3 border-t border-slate-800 pt-3">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Remoção</div>
-            <label className="block space-y-1 text-xs">
-              <span>Método</span>
-              <select className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs" value={method} onChange={(e) => setMethod(e.target.value as Method)}>
-                {(Object.keys(METHOD_LABEL) as Method[]).map((m) => (
-                  <option key={m} value={m}>
-                    {METHOD_LABEL[m]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Slider label="Raio do inpaint" value={radius} min={1} max={25} disabled={method === 'fill'} onChange={setRadius} />
-            <Slider label="Expandir máscara" value={dilate} min={0} max={12} suffix=" px" onChange={setDilate} />
-            <div className="grid grid-cols-2 gap-1">
-              <Button size="sm" variant="primary" disabled={!ready || !maskPixels} title="Enter" onClick={apply}>
-                Remover
-              </Button>
-              <Button size="sm" variant="ghost" className="text-slate-300 hover:bg-slate-800" disabled={!maskPixels} title="Esc" onClick={clearMask}>
-                Limpar máscara
-              </Button>
-            </div>
-            <div className="text-xs text-slate-400 tabular-nums">Máscara: {maskPixels.toLocaleString('pt-BR')} px</div>
-          </div>
-
-          <div className="space-y-2 border-t border-slate-800 pt-3">
-            <div className="grid grid-cols-2 gap-1">
-              <Button size="sm" variant="ghost" className="text-slate-300 hover:bg-slate-800" disabled={!history.undo} title="Ctrl+Z" onClick={undo}>
-                Desfazer
-              </Button>
-              <Button size="sm" variant="ghost" className="text-slate-300 hover:bg-slate-800" disabled={!history.redo} title="Ctrl+Y" onClick={redo}>
-                Refazer
-              </Button>
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="w-full text-slate-300 hover:bg-slate-800"
-              disabled={!ready}
-              title="Segure (ou segure C) para ver a base antes da edição"
-              onPointerDown={() => setComparing(true)}
-              onPointerUp={() => setComparing(false)}
-              onPointerLeave={() => setComparing(false)}
-            >
-              Comparar com a base atual
-            </Button>
-          </div>
-
-          <div className="space-y-2 border-t border-slate-800 pt-3">
-            <Slider label="Zoom" value={Math.round(zoom * 100)} min={10} max={200} step={5} suffix="%" onChange={(v) => setZoom(v / 100)} />
-            <div className="grid grid-cols-2 gap-1">
-              <Button size="sm" variant="ghost" className="text-slate-300 hover:bg-slate-800" disabled={!size} onClick={() => size && fitZoom(size.width)}>
-                Ajustar
-              </Button>
-              <Button size="sm" variant="ghost" className="text-slate-300 hover:bg-slate-800" onClick={() => setZoom(1)}>
-                100%
-              </Button>
-            </div>
-          </div>
-        </aside>
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          {status && <div className={cx('border-b border-slate-800 px-4 py-1.5 text-xs', status.error ? 'text-failed' : 'text-slate-400')}>{status.text}</div>}
-          <div ref={viewportRef} className="min-h-0 flex-1 overflow-auto bg-[#0b0b0f] p-6">
-            {!ready && (
-              <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400">
-                {loadError ? <span className="text-failed">Não consegui abrir o editor: {loadError}</span> : (
+        <div ref={viewportRef} className="relative min-w-0 flex-1 overflow-auto bg-[#191919]">
+          {!ready && (
+            <div className="absolute inset-0 grid place-items-center">
+              <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-[#333] bg-[#252525] px-8 py-6 text-center">
+                {loadError ? (
                   <>
-                    <Spinner /> Carregando o OpenCV (~10 MB, só na primeira vez) e a imagem base…
+                    <span className="font-medium text-failed">Não consegui abrir o editor</span>
+                    <span className="text-xs text-[#a8a8a8]">{loadError}</span>
+                  </>
+                ) : (
+                  <>
+                    <Spinner className="size-6 text-brand" />
+                    <span className="font-medium text-white">Preparando o editor</span>
+                    <span className="text-xs text-[#9a9a9a]">Carregando o OpenCV (~4 MB, só na primeira vez) e a imagem base.</span>
                   </>
                 )}
               </div>
-            )}
-            <div className={cx('relative mx-auto', !ready && 'hidden')} style={size ? { width: size.width * zoom, height: size.height * zoom } : undefined}>
-              <canvas ref={imageRef} className="absolute inset-0 h-full w-full select-none" />
+            </div>
+          )}
+          <div className={cx('flex min-h-full min-w-full w-max items-center justify-center p-10', !ready && 'invisible')}>
+            <div ref={wrapRef} className="relative shrink-0 bg-white shadow-[0_0_0_1px_#000,0_10px_40px_rgba(0,0,0,0.6)]" style={size ? { width: size.width * zoom, height: size.height * zoom } : undefined}>
+              <canvas ref={imageRef} className="absolute inset-0 h-full w-full" style={{ imageRendering: zoom >= 2 ? 'pixelated' : 'auto' }} />
               {comparing && sourceUrl && <img src={sourceUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full" />}
               <canvas
                 ref={maskRef}
-                className={cx('absolute inset-0 h-full w-full touch-none opacity-55', comparing && 'invisible', tool === 'wand' ? 'cursor-crosshair' : 'cursor-none')}
+                className={cx(
+                  'absolute inset-0 h-full w-full touch-none opacity-55',
+                  comparing && 'invisible',
+                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' ? 'cursor-crosshair' : 'cursor-none',
+                )}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
                 onPointerEnter={() => cursorRef.current?.classList.remove('hidden')}
-                onPointerLeave={() => cursorRef.current?.classList.add('hidden')}
+                onPointerLeave={() => {
+                  cursorRef.current?.classList.add('hidden')
+                  if (coordsRef.current) coordsRef.current.textContent = ''
+                }}
               />
-              {tool !== 'wand' && (
+              {showBrushCursor && (
                 <div
                   ref={cursorRef}
-                  className="pointer-events-none absolute left-0 top-0 hidden rounded-full border border-white/90 mix-blend-difference"
+                  className="pointer-events-none absolute left-0 top-0 hidden rounded-full border border-white mix-blend-difference"
                   style={{ width: cursorSize, height: cursorSize, marginLeft: -cursorSize / 2, marginTop: -cursorSize / 2 }}
                 />
               )}
             </div>
           </div>
-        </main>
+        </div>
+
+        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-[#111] bg-[#2b2b2b] lg:flex">
+          <Panel title="Remoção">
+            <div className="space-y-3 text-xs">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-[#a8a8a8]">Método</span>
+                <select className="w-40 rounded border border-[#3f3f3f] bg-[#1d1d1d] px-2 py-1 text-xs outline-none focus:border-brand" value={method} onChange={(e) => setMethod(e.target.value as Method)}>
+                  {(Object.keys(METHOD_LABEL) as Method[]).map((m) => (
+                    <option key={m} value={m}>
+                      {METHOD_LABEL[m]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex justify-end">
+                <Opt label="Raio" value={radius} min={1} max={25} disabled={method === 'fill'} onChange={setRadius} />
+              </div>
+              <div className="flex justify-end">
+                <Opt label="Expandir" value={dilate} min={0} max={12} suffix="px" onChange={setDilate} />
+              </div>
+              <div className="flex items-center justify-between rounded border border-[#3a3a3a] bg-[#232323] px-2.5 py-1.5">
+                <span className="text-[#a8a8a8]">Máscara</span>
+                <span className={cx('tabular-nums', maskPixels ? 'text-white' : 'text-[#777]')}>{maskPixels.toLocaleString('pt-BR')} px</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className="rounded-md bg-brand px-3 py-1.5 font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" disabled={!ready || !maskPixels} title="Enter" onClick={apply}>
+                  Remover
+                </button>
+                <button type="button" className="rounded-md border border-[#444] px-3 py-1.5 text-[#d6d6d6] hover:bg-[#3a3a3a] disabled:cursor-not-allowed disabled:opacity-40" disabled={!maskPixels} title="Esc" onClick={clearMask}>
+                  Limpar máscara
+                </button>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel title="Histórico" right={<span className="text-[10px] text-[#888]">até {HISTORY_LIMIT} passos</span>}>
+            <ol className="-mx-1 space-y-0.5 text-xs">
+              <li>
+                <button
+                  type="button"
+                  disabled={history.dropped}
+                  onClick={() => jumpTo(0)}
+                  className={cx('flex w-full items-center gap-2 rounded px-2 py-1 text-left', history.done.length === 0 ? 'bg-[#3d4b63] text-white' : 'hover:bg-[#363636]', history.dropped && 'cursor-not-allowed opacity-40')}
+                  title={history.dropped ? 'Passos antigos descartados para economizar memória' : 'Voltar ao início'}
+                >
+                  <span className="size-6 shrink-0 overflow-hidden rounded-sm border border-[#555] bg-[#1d1d1d]">{sourceUrl && <img src={sourceUrl} alt="" className="size-full object-cover object-top" />}</span>
+                  Base aberta
+                </button>
+              </li>
+              {history.done.map((label, i) => (
+                <li key={`d${i}`}>
+                  <button type="button" onClick={() => jumpTo(i + 1)} className={cx('flex w-full items-center gap-2 rounded px-2 py-1 text-left', i === history.done.length - 1 ? 'bg-[#3d4b63] text-white' : 'hover:bg-[#363636]')}>
+                    <Svg className="size-4 shrink-0 text-[#a8a8a8]">{label.startsWith('Caneta') ? ICONS.wand : ICONS.brush}</Svg>
+                    {label}
+                  </button>
+                </li>
+              ))}
+              {history.undone.map((label, i) => (
+                <li key={`u${i}`}>
+                  <button type="button" onClick={() => jumpTo(history.done.length + i + 1)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[#777] hover:bg-[#363636]">
+                    <Svg className="size-4 shrink-0">{label.startsWith('Caneta') ? ICONS.wand : ICONS.brush}</Svg>
+                    {label}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </Panel>
+
+          <Panel title="Informações">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+              <dt className="text-[#9a9a9a]">Arquivo</dt>
+              <dd className="truncate text-right" title={page.file}>
+                {page.file}
+              </dd>
+              <dt className="text-[#9a9a9a]">Tamanho</dt>
+              <dd className="text-right tabular-nums">{size ? `${size.width} × ${size.height} px` : '—'}</dd>
+              <dt className="text-[#9a9a9a]">Salva como</dt>
+              <dd className="text-right">{ext || 'PNG'} · versão nova da base</dd>
+            </dl>
+          </Panel>
+
+          <Panel
+            title="Atalhos"
+            right={
+              <button type="button" className="text-[10px] text-[#9a9a9a] hover:text-white" onClick={() => setShowKeys(!showKeys)}>
+                {showKeys ? 'esconder' : 'mostrar'}
+              </button>
+            }
+          >
+            {showKeys ? (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                {SHORTCUTS.map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt>
+                      <kbd className="rounded border border-[#4a4a4a] bg-[#1d1d1d] px-1 text-[10px] text-[#d6d6d6]">{k}</kbd>
+                    </dt>
+                    <dd className="text-[#a8a8a8]">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-xs text-[#888]">B, E, W, H trocam a ferramenta; Enter remove; Ctrl+Z desfaz.</p>
+            )}
+          </Panel>
+        </aside>
       </div>
-    </div>
+
+      <div className="flex h-8 shrink-0 items-center gap-1 border-t border-[#111] bg-[#252525] px-2 text-[11px] text-[#a8a8a8]">
+        <IconButton icon={ICONS.zoomOut} label="Diminuir zoom (Ctrl −)" className="size-6" disabled={!ready} onClick={() => zoomTo(zoom / 1.25)} />
+        <span className="w-12 text-center tabular-nums text-[#d6d6d6]">{Math.round(zoom * 100)}%</span>
+        <IconButton icon={ICONS.zoomIn} label="Aumentar zoom (Ctrl +)" className="size-6" disabled={!ready} onClick={() => zoomTo(zoom * 1.25)} />
+        <IconButton icon={ICONS.fit} label="Ajustar à tela (Ctrl+0)" className="size-6" disabled={!ready} onClick={() => size && fitZoom(size.width, size.height)} />
+        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-[#3a3a3a] hover:text-white disabled:opacity-40" disabled={!ready} onClick={() => zoomTo(1)} title="Tamanho real (Ctrl+1)">
+          100%
+        </button>
+        <Divider />
+        <span className="tabular-nums">{size ? `${size.width} × ${size.height}` : '—'}</span>
+        <Divider />
+        <span ref={coordsRef} className="w-28 tabular-nums" />
+        <span className={cx('ml-auto truncate', status?.error ? 'text-failed' : 'text-[#a8a8a8]')}>{status?.text ?? (ready ? 'Pronto' : 'Carregando…')}</span>
+      </div>
+    </div>,
+    document.body,
   )
 }
