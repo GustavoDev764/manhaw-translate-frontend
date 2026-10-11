@@ -178,7 +178,7 @@ export function ProcessingPage() {
               <span>
                 <span className="block font-semibold">Contar os capítulos esperando a GPU no limite da fila de processamento</span>
                 <span className="block text-sm text-slate-500">
-                  Na tradução pelo Gemma, o capítulo envia os lotes para a GPU e libera o worker enquanto espera. Ligado, um capítulo novo só começa a traduzir se os que estão rodando mais os que estão esperando a GPU couberem no limite configurado na Fila de processamento acima (hoje {num(d.workerConcurrency)}); os demais ficam na fila e tentam de novo a cada 20 segundos. Assim a GPU nunca recebe mais capítulos do que esse limite. Desligado, a GPU pode receber muitos capítulos de uma vez. Não vale para a tradução pela Anthropic.
+                  Na tradução pelo Gemma, o capítulo envia os lotes para a GPU e libera o worker enquanto espera. Ligado, um capítulo novo só começa a traduzir se os que estão rodando mais os que estão esperando a GPU couberem no limite configurado na Fila de processamento acima (hoje {num(d.workerConcurrency)}); os demais ficam na fila e entram na ordem em que foram criados, do capítulo mais antigo para o mais novo. Assim a GPU nunca recebe mais capítulos do que esse limite. Desligado, a GPU pode receber muitos capítulos de uma vez. Não vale para a tradução pela Anthropic.
                 </span>
               </span>
             </label>
