@@ -9,7 +9,8 @@ import { reviewApi, type ReviewPage } from '../../reviewApi'
 import { blankCanvas, ctx2d, flatten, FUNDO, layerFromSnap, mountCanvas, newLayerId, snapLayer, type Layer, type LayerSnap } from './baseLayers'
 import { LayersPanel } from './LayersPanel'
 
-type Tool = 'move' | 'brush' | 'imageEraser' | 'eraser' | 'wand' | 'crop' | 'hand'
+type Tool = 'move' | 'brush' | 'imageEraser' | 'eraser' | 'wand' | 'lasso' | 'crop' | 'hand'
+type Lasso = { points: { x: number; y: number }[]; closed: boolean }
 type Point = { x: number; y: number }
 type Rect = { x: number; y: number; w: number; h: number }
 type Snapshot = { fundo: ImageData; origin: Point; layers: LayerSnap[] }
@@ -28,7 +29,9 @@ const LAYER_STEPS = ['Nova camada', 'Mover', 'Mesclar', 'Excluir', 'Duplicar', '
 const stepIcon = (label: string) =>
   LAYER_STEPS.some((s) => label.startsWith(s))
     ? ICONS.layers
-    : label.startsWith('Caneta')
+    : label.startsWith('Laço')
+      ? ICONS.lasso
+      : label.startsWith('Caneta')
       ? ICONS.wand
       : label.startsWith('Recorte')
         ? ICONS.crop
@@ -50,6 +53,16 @@ function Svg({ children, className }: { children: ReactNode; className?: string 
 }
 
 const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 'fit' | 'upload' | 'layers', ReactNode> = {
+  lasso: (
+    <>
+      <path d="M4 7 11 3l9 5-3 9-7 3-6-6Z" strokeDasharray="2.5 2" />
+      <circle cx="4" cy="7" r="1.6" fill="currentColor" />
+      <circle cx="11" cy="3" r="1.6" fill="currentColor" />
+      <circle cx="20" cy="8" r="1.6" fill="currentColor" />
+      <circle cx="17" cy="17" r="1.6" fill="currentColor" />
+      <circle cx="4" cy="14" r="1.6" fill="currentColor" />
+    </>
+  ),
   move: (
     <>
       <path d="M12 2v20" />
@@ -170,13 +183,17 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
   { tool: 'imageEraser', label: 'Borracha de imagem', key: 'E', hint: 'Apaga direto na imagem pintando com a cor escolhida (Alt+clique pega a cor da imagem)' },
   { tool: 'eraser', label: 'Borracha de máscara', key: 'M', hint: 'Tira o vermelho onde a máscara passou do ponto; não apaga a imagem (para isso, pinte com o Pincel e clique em Remover)' },
   { tool: 'wand', label: 'Caneta mágica', key: 'W', hint: 'Clique na parte clara de um balão: marca só as letras dele' },
+  { tool: 'lasso', label: 'Laço poligonal', key: 'L', hint: 'Clique ponto a ponto em volta da área; feche no primeiro ponto, com duplo clique ou Enter' },
   { tool: 'crop', label: 'Recorte', key: 'R', hint: 'Arraste para escolher a área que fica; o resto da imagem é cortado (Enter aplica)' },
   { tool: 'hand', label: 'Mão', key: 'H', hint: 'Arraste para mover a imagem (ou segure Espaço)' },
 ]
 
 const SHORTCUTS: [string, string][] = [
   ['B / E / M', 'Pincel, borracha de imagem, borracha de máscara'],
-  ['V / W / R / H', 'Mover camada, caneta mágica, recorte, mão'],
+  ['V / W / L / R / H', 'Mover camada, caneta mágica, laço, recorte, mão'],
+  ['Laço: Enter / Backspace', 'Fechar a seleção / tirar o último ponto'],
+  ['Laço: Delete', 'Apagar a seleção (camada: transparente; Fundo: reconstrói)'],
+  ['Ctrl+J / Ctrl+Shift+J', 'Copiar / recortar a seleção para nova camada'],
   ['Alt+clique', 'Pegar a cor da imagem (borracha de imagem)'],
   ['[ e ]', 'Diminuir / aumentar pincel'],
   ['Enter', 'Remover a máscara / aplicar o recorte'],
@@ -283,6 +300,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [layers, setLayersState] = useState<Layer[]>([])
   const [activeId, setActiveId] = useState<string>(FUNDO)
   const [fundoVisible, setFundoVisible] = useState(true)
+  const [lasso, setLasso] = useState<Lasso | null>(null)
+  const [lassoHover, setLassoHover] = useState<Point | null>(null)
   const [ask, confirmDialog] = useConfirm()
   const layersRef = useRef<Layer[]>([])
   const layerFileRef = useRef<HTMLInputElement>(null)
@@ -402,6 +421,10 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     setTool(t)
     if (t === 'imageEraser' || t === 'eraser') setEraserKind(t)
     if (t !== 'crop') setCrop(null)
+    if (t !== 'lasso') {
+      setLasso(null)
+      setLassoHover(null)
+    }
     setEraserMenu(false)
   }
 
@@ -617,6 +640,103 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     setActiveId(FUNDO)
   }
 
+  const tracePolygon = (ctx: CanvasRenderingContext2D, points: Point[], ox = 0, oy = 0) => {
+    ctx.beginPath()
+    points.forEach((p, i) => (i ? ctx.lineTo(p.x - ox, p.y - oy) : ctx.moveTo(p.x - ox, p.y - oy)))
+    ctx.closePath()
+  }
+
+  const closeLasso = () => {
+    if (!lasso || lasso.closed) return
+    if (lasso.points.length < 3) {
+      setStatus({ text: 'O laço precisa de pelo menos 3 pontos.', error: true })
+      return
+    }
+    setLasso({ ...lasso, closed: true })
+    setLassoHover(null)
+    setStatus({ text: 'Seleção fechada. Escolha o que fazer na barra de opções (Delete apaga, Ctrl+J copia para camada).' })
+  }
+
+  const lassoBox = (points: Point[]): Rect | null => {
+    const image = imageRef.current!
+    const xs = points.map((p) => p.x)
+    const ys = points.map((p) => p.y)
+    const x = Math.max(0, Math.floor(Math.min(...xs)))
+    const y = Math.max(0, Math.floor(Math.min(...ys)))
+    const w = Math.min(image.width, Math.ceil(Math.max(...xs))) - x
+    const h = Math.min(image.height, Math.ceil(Math.max(...ys))) - y
+    return w > 0 && h > 0 ? { x, y, w, h } : null
+  }
+
+  const lassoSource = () => {
+    const l = activeLayer()
+    return l ? { canvas: l.canvas, x: l.x, y: l.y, name: l.name, layer: l } : { canvas: imageRef.current!, x: 0, y: 0, name: 'Fundo', layer: null }
+  }
+
+  const lassoToLayer = (cut: boolean) => {
+    if (!lasso?.closed) return
+    const box = lassoBox(lasso.points)
+    if (!box) return
+    const src = lassoSource()
+    pushUndo(snapshot(), `Laço: ${cut ? 'recortar' : 'copiar'} para camada`)
+    const canvas = blankCanvas(box.w, box.h)
+    const ctx = ctx2d(canvas)
+    tracePolygon(ctx, lasso.points, box.x, box.y)
+    ctx.save()
+    ctx.clip()
+    ctx.drawImage(src.canvas, src.x - box.x, src.y - box.y)
+    ctx.restore()
+    if (cut) {
+      const sctx = ctx2d(src.canvas)
+      tracePolygon(sctx, lasso.points, src.x, src.y)
+      if (src.layer) {
+        sctx.globalCompositeOperation = 'destination-out'
+        sctx.fill()
+        sctx.globalCompositeOperation = 'source-over'
+      } else {
+        sctx.fillStyle = paint
+        sctx.fill()
+      }
+    }
+    const layer: Layer = { id: newLayerId(), name: `${cut ? 'Recorte' : 'Cópia'} de ${src.name}`, canvas, x: box.x, y: box.y, visible: true, opacity: 1 }
+    const list = layersRef.current
+    const at = src.layer ? list.indexOf(src.layer) + 1 : 0
+    setLayers([...list.slice(0, at), layer, ...list.slice(at)])
+    setActiveId(layer.id)
+    setLasso(null)
+    pickTool('move')
+    setStatus({ text: `Seleção ${cut ? 'recortada' : 'copiada'} para a camada "${layer.name}" (${box.w} × ${box.h} px). Arraste com Mover (V).${cut && !src.layer ? ` No Fundo o buraco foi pintado com ${paint}.` : ''}` })
+  }
+
+  const lassoToMask = () => {
+    if (!lasso?.closed || !maskRef.current) return
+    const ctx = maskCtx()
+    tracePolygon(ctx, lasso.points)
+    ctx.fillStyle = `rgb(${MASK_COLOR.join(',')})`
+    ctx.fill()
+    maskSource.current = 'Laço'
+    refreshMaskCount()
+    setLasso(null)
+  }
+
+  const lassoDelete = () => {
+    if (!lasso?.closed) return
+    const l = activeLayer()
+    if (l) {
+      pushUndo(snapshot(), `Laço: apagar em ${l.name}`)
+      const ctx = ctx2d(l.canvas)
+      tracePolygon(ctx, lasso.points, l.x, l.y)
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.fill()
+      ctx.globalCompositeOperation = 'source-over'
+      setLayers([...layersRef.current])
+      setLasso(null)
+      return
+    }
+    lassoToMask()
+    apply()
+  }
+
   const cropHit = (p: Point, c: Rect): string | null => {
     const t = 10 / zoom
     const inX = p.x >= c.x - t && p.x <= c.x + c.w + t
@@ -745,6 +865,19 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       return
     }
     const point = toImagePoint(e)
+    if (tool === 'lasso') {
+      const near = 8 / zoom
+      if (!lasso || lasso.closed) {
+        setLasso({ points: [point], closed: false })
+        return
+      }
+      const first = lasso.points[0]
+      if (lasso.points.length >= 3 && Math.hypot(point.x - first.x, point.y - first.y) <= near) return closeLasso()
+      const last = lasso.points[lasso.points.length - 1]
+      if (Math.hypot(point.x - last.x, point.y - last.y) <= 1) return
+      setLasso({ points: [...lasso.points, point], closed: false })
+      return
+    }
     if (tool === 'move') {
       const l = activeLayer()
       if (!l) {
@@ -812,6 +945,10 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     if (pan.current && vp) {
       vp.scrollLeft = pan.current.left - (e.clientX - pan.current.x)
       vp.scrollTop = pan.current.top - (e.clientY - pan.current.y)
+      return
+    }
+    if (tool === 'lasso') {
+      if (lasso && !lasso.closed) setLassoHover(toImagePoint(e))
       return
     }
     const md = moveDrag.current
@@ -889,6 +1026,21 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       } else if (mod && k === '1') {
         e.preventDefault()
         zoomTo(1)
+      } else if (mod && k === 'j') {
+        e.preventDefault()
+        lassoToLayer(e.shiftKey)
+      } else if (lasso && !lasso.closed && k === 'backspace') {
+        e.preventDefault()
+        const points = lasso.points.slice(0, -1)
+        setLasso(points.length ? { points, closed: false } : null)
+      } else if (lasso?.closed && (k === 'delete' || k === 'backspace')) {
+        e.preventDefault()
+        lassoDelete()
+      } else if (lasso && k === 'escape') {
+        setLasso(null)
+        setLassoHover(null)
+      } else if (lasso && !lasso.closed && k === 'enter') {
+        closeLasso()
       } else if (mod || e.altKey) {
         return
       } else if (k === 'v') pickTool('move')
@@ -897,6 +1049,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       else if (k === 'm') pickTool('eraser')
       else if (k === 'w') pickTool('wand')
       else if (k === 'r') pickTool('crop')
+      else if (k === 'l') pickTool('lasso')
       else if (k === 'h') pickTool('hand')
       else if (k === '[') setBrush((b) => Math.max(2, b - 4))
       else if (k === ']') setBrush((b) => Math.min(160, b + 4))
@@ -1071,6 +1224,37 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
           </>
         )}
         {tool === 'hand' && <span className="text-[#9a9a9a]">Arraste para mover a imagem. Ctrl+roda do mouse para zoom.</span>}
+        {tool === 'lasso' && !lasso?.closed && (
+          <>
+            <span className="whitespace-nowrap text-[#c8c8c8]">{lasso ? `${lasso.points.length} pontos` : 'Clique para começar'}</span>
+            <span className="whitespace-nowrap text-[#8a8a8a]">feche no primeiro ponto (azul), duplo clique ou Enter · Backspace tira o último ponto · Esc cancela</span>
+            {lasso && (
+              <button type="button" className="whitespace-nowrap rounded bg-brand px-2.5 py-0.5 font-medium text-white hover:brightness-110 disabled:opacity-40" disabled={lasso.points.length < 3} onClick={closeLasso}>
+                Fechar seleção
+              </button>
+            )}
+          </>
+        )}
+        {tool === 'lasso' && lasso?.closed && (
+          <>
+            <span className="whitespace-nowrap text-[#9a9a9a]">Seleção em {selectedLayer ? `“${selectedLayer.name}”` : 'Fundo'}:</span>
+            <button type="button" className="whitespace-nowrap rounded border border-[#444] px-2 py-0.5 text-[#d6d6d6] hover:bg-[#3a3a3a]" title="Ctrl+J" onClick={() => lassoToLayer(false)}>
+              Copiar para camada
+            </button>
+            <button type="button" className="whitespace-nowrap rounded border border-[#444] px-2 py-0.5 text-[#d6d6d6] hover:bg-[#3a3a3a]" title={`Ctrl+Shift+J${selectedLayer ? '' : `. No Fundo, o buraco é pintado com a cor da borracha (${paint})`}`} onClick={() => lassoToLayer(true)}>
+              Recortar para camada
+            </button>
+            <button type="button" className="whitespace-nowrap rounded bg-brand px-2.5 py-0.5 font-medium text-white hover:brightness-110" title="Delete" onClick={lassoDelete}>
+              {selectedLayer ? 'Apagar (transparente)' : 'Apagar e reconstruir fundo'}
+            </button>
+            <button type="button" className="whitespace-nowrap rounded border border-[#444] px-2 py-0.5 text-[#d6d6d6] hover:bg-[#3a3a3a]" title="Pinta a seleção na máscara vermelha para ajustar antes de Remover" onClick={lassoToMask}>
+              Adicionar à máscara
+            </button>
+            <button type="button" className="whitespace-nowrap rounded px-2 py-0.5 text-[#c8c8c8] hover:bg-[#3a3a3a]" title="Esc" onClick={() => setLasso(null)}>
+              Cancelar
+            </button>
+          </>
+        )}
         {tool === 'crop' && (
           <>
             <span className="whitespace-nowrap tabular-nums text-[#c8c8c8]">
@@ -1222,10 +1406,11 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                 className={cx(
                   'absolute inset-0 h-full w-full touch-none opacity-55',
                   comparing && 'invisible',
-                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' ? 'cursor-crosshair' : tool === 'move' ? 'cursor-move' : tool === 'crop' ? '' : 'cursor-none',
+                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' || tool === 'lasso' ? 'cursor-crosshair' : tool === 'move' ? 'cursor-move' : tool === 'crop' ? '' : 'cursor-none',
                 )}
                 style={tool === 'crop' && !handActive ? { cursor: cropCursor } : undefined}
                 onPointerDown={onPointerDown}
+                onDoubleClick={() => tool === 'lasso' && closeLasso()}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
@@ -1247,6 +1432,25 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                   className="pointer-events-none absolute outline outline-1 outline-offset-0 outline-sky-400 [outline-style:dashed]"
                   style={{ left: selectedLayer.x * zoom, top: selectedLayer.y * zoom, width: selectedLayer.canvas.width * zoom, height: selectedLayer.canvas.height * zoom }}
                 />
+              )}
+              {lasso && size && (
+                <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden>
+                  {lasso.closed && <polygon points={lasso.points.map((p) => `${p.x},${p.y}`).join(' ')} fill="rgba(56,189,248,0.15)" />}
+                  {(() => {
+                    const pts = [...lasso.points, ...(!lasso.closed && lassoHover ? [lassoHover] : [])].map((p) => `${p.x},${p.y}`).join(' ')
+                    const Shape = lasso.closed ? 'polygon' : 'polyline'
+                    return (
+                      <>
+                        <Shape points={pts} fill="none" stroke="#000" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+                        <Shape points={pts} fill="none" stroke="#fff" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+                      </>
+                    )
+                  })()}
+                  {!lasso.closed &&
+                    lasso.points.map((p, i) => (
+                      <rect key={i} x={p.x - 4 / zoom} y={p.y - 4 / zoom} width={8 / zoom} height={8 / zoom} fill={i === 0 && lasso.points.length >= 3 ? '#38bdf8' : '#fff'} stroke="#000" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                    ))}
+                </svg>
               )}
               {crop && crop.w > 0 && crop.h > 0 && (
                 <div
