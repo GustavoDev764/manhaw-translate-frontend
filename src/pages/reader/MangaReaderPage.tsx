@@ -4,6 +4,9 @@ import { assetViewUrl } from '../../lib/assets'
 import { href, usePolling } from '../../lib/hooks'
 import { reviewApi } from '../../reviewApi'
 import { libraryApi, type LibraryChapter, type LibraryPage } from '../../workflowsApi'
+import { AutoScrollPanel } from './AutoScrollPanel'
+import { useAutoScroll } from './useAutoScroll'
+import { readAuto, readSpot, saveAuto, saveSpot, type AutoSettings, type ReadingSpot } from './readerStore'
 
 const THEME = {
   '--reader-bg': '#0b0b0f',
@@ -44,6 +47,8 @@ const ICON = {
   next: 'M9 18l6-6-6-6',
   list: 'M4 6h16M4 12h16M4 18h10',
   top: 'M12 19V5M5 12l7-7 7 7',
+  play: 'M8 5v14l11-7z',
+  pause: 'M8 5v14M16 5v14',
 }
 
 function BarButton({ title, onClick, disabled, children, wide }: { title: string; onClick: () => void; disabled?: boolean; children: ReactNode; wide?: boolean }) {
@@ -79,6 +84,10 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   const busy = useRef(false)
   const lastY = useRef(0)
   const clickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const pending = useRef<ReadingSpot | null>(null)
+  const [auto, setAuto] = useState<AutoSettings>(readAuto)
+  const [playing, setPlaying] = useState(false)
+  const [autoPanel, setAutoPanel] = useState(false)
 
   const indexOf = useCallback((id: string | undefined) => chapters.findIndex((c) => c.id === id), [chapters])
   const currentChapter = chapters[indexOf(current?.chapterId)] ?? loaded[0]?.chapter
@@ -89,7 +98,7 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   const atEnd = !!lastLoaded && !nextToLoad
 
   const open = useCallback(
-    async (id: string) => {
+    async (id: string, page = 0) => {
       const chapter = chapters.find((c) => c.id === id)
       if (!chapter) return
       busy.current = true
@@ -97,10 +106,12 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
       setDrawer(false)
       try {
         const r = await libraryApi.pages(id)
+        const start = page > 0 && page < r.pages.length ? page : 0
+        pending.current = start > 0 ? { chapterId: id, page: start } : null
         setLoaded([{ chapter, pages: r.pages }])
-        setCurrent({ chapterId: id, page: 0 })
+        setCurrent({ chapterId: id, page: start })
         setBars(true)
-        scroller.current?.scrollTo({ top: 0 })
+        if (!start) scroller.current?.scrollTo({ top: 0 })
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -127,8 +138,15 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
 
   useEffect(() => {
     if (!chapters.length || loaded.length || busy.current) return
-    void open(chapters.some((c) => c.id === chapterId) ? chapterId! : chapters[0].id)
-  }, [chapters, chapterId, loaded.length, open])
+    const saved = readSpot(slug)
+    const has = (id: string | undefined) => !!id && chapters.some((c) => c.id === id)
+    const id = has(chapterId) ? chapterId! : has(saved?.chapterId) ? saved!.chapterId : chapters[0].id
+    void open(id, saved?.chapterId === id ? saved.page : 0)
+  }, [chapters, chapterId, loaded.length, open, slug])
+
+  useEffect(() => {
+    if (current && !pending.current) saveSpot(slug, current)
+  }, [current, slug])
 
   useEffect(() => {
     tracker.current = new IntersectionObserver(
@@ -168,18 +186,73 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
     setBars(true)
   }, [currentChapter])
 
+  const stepPage = useCallback(
+    (dir: 1 | -1) => {
+      const el = scroller.current
+      if (!el || !current) return
+      const imgs = [...el.querySelectorAll<HTMLImageElement>('img[data-index]')]
+      const i = imgs.findIndex((img) => img.dataset.chapter === current.chapterId && Number(img.dataset.index) === current.page)
+      if (i < 0) return
+      const base = el.getBoundingClientRect().top - el.scrollTop
+      const topOf = (img: HTMLElement) => img.getBoundingClientRect().top - base
+      const top = el.scrollTop
+      const h = el.clientHeight
+      const imgTop = topOf(imgs[i])
+      const imgBottom = imgTop + imgs[i].offsetHeight
+      let target: number
+      if (dir > 0) {
+        target = imgBottom > top + h + 2 ? top + h * 0.9 : imgBottom
+        if (!imgs[i + 1]) void appendNext()
+      } else {
+        const back = imgTop < top - 2 ? imgTop : imgs[i - 1] ? topOf(imgs[i - 1]) : 0
+        target = Math.max(back, top - h * 0.9)
+      }
+      el.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+    },
+    [current, appendNext],
+  )
+
+  const startAuto = useCallback(() => {
+    setPlaying(true)
+    setAutoPanel(false)
+    setDrawer(false)
+  }, [])
+
+  const changeAuto = (next: AutoSettings) => {
+    setAuto(next)
+    saveAuto(next)
+  }
+
+  const openDrawer = () => {
+    setDrawer(true)
+    setPlaying(false)
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      if (e.key === 'Escape') setDrawer(false)
-      else if (e.key === 'ArrowLeft') goTo(-1)
-      else if (e.key === 'ArrowRight') goTo(1)
-      else if (e.key === 'Home') toTop()
+      if (e.key === 'Escape') {
+        setDrawer(false)
+        setAutoPanel(false)
+      } else if (e.key === ' ') {
+        e.preventDefault()
+        if (t?.tagName === 'BUTTON') t.blur()
+        if (playing) setPlaying(false)
+        else startAuto()
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        if (e.shiftKey) goTo(-1)
+        else stepPage(-1)
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        if (e.shiftKey) goTo(1)
+        else stepPage(1)
+      } else if (e.key === 'Home') toTop()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [goTo, toTop])
+  }, [goTo, toTop, stepPage, playing, startAuto])
 
   const onScroll = () => {
     const y = scroller.current?.scrollTop ?? 0
@@ -203,11 +276,25 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   const currentPage = loaded.find((l) => l.chapter.id === currentChapter?.id)?.pages[current?.page ?? 0]
   const isReported = currentPage ? (reportedNow[currentPage.id] ?? !!currentPage.reported) : false
 
-  const say = (text: string) => {
+  const say = useCallback((text: string) => {
     setFlash(text)
     clearTimeout(flashTimer.current)
     flashTimer.current = setTimeout(() => setFlash(null), 2500)
-  }
+  }, [])
+
+  useEffect(() => {
+    const spot = pending.current
+    const chapter = spot && loaded.find((l) => l.chapter.id === spot.chapterId)?.chapter
+    if (!spot || !chapter) return
+    pending.current = null
+    scroller.current?.querySelector(`img[data-chapter="${spot.chapterId}"][data-index="${spot.page}"]`)?.scrollIntoView({ block: 'start' })
+    say(`Continuando do ${label(chapter).toLowerCase()}, página ${spot.page + 1}.`)
+  }, [loaded, say])
+
+  useAutoScroll(scroller, playing, auto, () => {
+    setPlaying(false)
+    say('Leitura automática parada: você chegou ao fim dos capítulos disponíveis.')
+  })
 
   const toggleReport = async () => {
     if (!currentPage || !currentChapter) return
@@ -273,7 +360,7 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
               <div className="text-sm text-[var(--reader-muted)]">Você chegou ao último capítulo disponível.</div>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 <button type="button" onClick={toTop} className="rounded-lg border border-[var(--reader-border)] px-4 py-2 text-sm hover:bg-white/5">Topo do capítulo</button>
-                <button type="button" onClick={() => setDrawer(true)} className="rounded-lg bg-[var(--reader-accent)] px-4 py-2 text-sm font-medium text-black">Escolher capítulo</button>
+                <button type="button" onClick={openDrawer} className="rounded-lg bg-[var(--reader-accent)] px-4 py-2 text-sm font-medium text-black">Escolher capítulo</button>
                 <a href={href('s', slug)} className="rounded-lg border border-[var(--reader-border)] px-4 py-2 text-sm hover:bg-white/5">Voltar à obra</a>
               </div>
             </div>
@@ -301,24 +388,34 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
         </div>
       </div>
 
-      <div className={`pointer-events-none fixed inset-x-0 bottom-4 z-10 flex justify-center transition-transform duration-200 motion-reduce:transition-none ${bars ? 'translate-y-0' : 'translate-y-[150%]'}`}>
+      <div className={`pointer-events-none fixed inset-x-0 bottom-4 z-10 flex flex-col items-center gap-2 transition-transform duration-200 motion-reduce:transition-none ${bars || autoPanel ? 'translate-y-0' : 'translate-y-[150%]'}`}>
+        {autoPanel && (
+          <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+            <AutoScrollPanel settings={auto} playing={playing} onChange={changeAuto} onToggle={() => (playing ? setPlaying(false) : startAuto())} />
+          </div>
+        )}
         <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-[var(--reader-border)] bg-[var(--reader-surface)] p-1 shadow-2xl backdrop-blur-md">
-          <BarButton title="Capítulo anterior (←)" onClick={() => goTo(-1)} disabled={currentIndex <= 0}>
+          <BarButton title="Capítulo anterior (Shift + ←)" onClick={() => goTo(-1)} disabled={currentIndex <= 0}>
             <Icon d={ICON.prev} />
           </BarButton>
-          <BarButton title="Escolher capítulo" onClick={() => setDrawer(true)} wide>
+          <BarButton title="Escolher capítulo" onClick={openDrawer} wide>
             <Icon d={ICON.list} />
             <span className="tabular-nums">{currentChapter ? `Cap. ${currentChapter.number}` : 'Capítulos'}</span>
           </BarButton>
           <BarButton title="Topo do capítulo (Home)" onClick={toTop}>
             <Icon d={ICON.top} />
           </BarButton>
+          <BarButton title={playing ? 'Leitura automática ligada (Espaço pausa)' : 'Leitura automática (Espaço começa)'} onClick={() => setAutoPanel((v) => !v)}>
+            <span className={playing ? 'text-[var(--reader-accent)]' : ''}>
+              <Icon d={playing ? ICON.pause : ICON.play} />
+            </span>
+          </BarButton>
           <BarButton title={isReported ? 'Revisão já relatada nesta página (clique para retirar)' : 'Relatar revisão nesta página'} onClick={() => void toggleReport()} disabled={!currentPage}>
             <span className={isReported ? 'text-amber-400' : ''}>
               <AlertTriangle className="size-5" filled={isReported} />
             </span>
           </BarButton>
-          <BarButton title="Próximo capítulo (→)" onClick={() => goTo(1)} disabled={currentIndex < 0 || currentIndex >= chapters.length - 1}>
+          <BarButton title="Próximo capítulo (Shift + →)" onClick={() => goTo(1)} disabled={currentIndex < 0 || currentIndex >= chapters.length - 1}>
             <Icon d={ICON.next} />
           </BarButton>
         </div>
