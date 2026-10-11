@@ -39,7 +39,7 @@ export function LaunchDialog({
   onClose,
   onCreated,
 }: {
-  input: Omit<LaunchInput, 'force' | 'includeDrafts' | 'confirmApproved'> | null
+  input: Omit<LaunchInput, 'force' | 'includeDrafts' | 'confirmApproved' | 'perChapter'> | null
   onClose: () => void
   onCreated?: (id: number) => void
 }) {
@@ -47,6 +47,7 @@ export function LaunchDialog({
   const [force, setForce] = useState(false)
   const [includeDrafts, setIncludeDrafts] = useState(false)
   const [confirmApproved, setConfirmApproved] = useState(false)
+  const [perChapter, setPerChapter] = useState(false)
   const [plan, setPlan] = useState<Plan | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -72,17 +73,22 @@ export function LaunchDialog({
     setForce(false)
     setIncludeDrafts(false)
     setConfirmApproved(false)
+    setPerChapter(false)
     setError(null)
     onClose()
   }
+
+  const runChapters = plan?.chapters.filter((c) => c.willRun > 0).length ?? 0
 
   const start = async () => {
     if (!input) return
     setBusy(true)
     try {
-      const r = await workflowsApi.create({ ...input, force, includeDrafts, confirmApproved })
+      const r = await workflowsApi.create({ ...input, force, includeDrafts, confirmApproved, perChapter: perChapter && runChapters > 1 })
       const out = r.excluded?.length ? ` · ${r.excluded.length} ${r.excluded.length === 1 ? 'capítulo ficou' : 'capítulos ficaram'} de fora` : ''
-      toast('done', `Workflow #${r.id} criado: ${STAGE_LABEL[input.type]} · ${num(r.totals.willRun)} ${input.type === 'download' ? 'capítulos' : 'páginas'}${out}`)
+      const ids = r.ids ?? [r.id]
+      const head = ids.length > 1 ? `${ids.length} workflows criados (#${ids[0]} a #${ids[ids.length - 1]})` : `Workflow #${r.id} criado`
+      toast('done', `${head}: ${STAGE_LABEL[input.type]} · ${num(r.totals.willRun)} ${input.type === 'download' ? 'capítulos' : 'páginas'}${out}`)
       onCreated?.(r.id)
       close()
     } catch (err) {
@@ -171,6 +177,17 @@ export function LaunchDialog({
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input type="checkbox" className="accent-brand" checked={force} onChange={(e) => setForce(e.target.checked)} />
             Baixar de novo os já baixados (só acrescenta páginas que faltam)
+          </label>
+        )}
+        {runChapters > 1 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
+            <input type="checkbox" className="mt-0.5 accent-brand" checked={perChapter} onChange={(e) => setPerChapter(e.target.checked)} data-testid="per-chapter" />
+            <span>
+              <b>Um workflow por capítulo</b>
+              <span className="block text-xs text-slate-500">
+                {perChapter ? `Cria ${num(runChapters)} workflows separados, um para cada capítulo. Cada um pode ser acompanhado, cancelado e refeito sozinho.` : `Por padrão os ${num(runChapters)} capítulos ficam juntos em um só workflow.`}
+              </span>
+            </span>
           </label>
         )}
         {t && t.noText > 0 && (

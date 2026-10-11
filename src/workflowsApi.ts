@@ -95,6 +95,7 @@ export interface LaunchInput {
   force?: boolean
   includeDrafts?: boolean
   confirmApproved?: boolean
+  perChapter?: boolean
 }
 
 export type ExcludeReason = 'busy' | 'not_scanned' | 'no_pages' | 'no_layers'
@@ -381,7 +382,7 @@ export const libraryApi = {
 
 export const workflowsApi = {
   plan: (input: LaunchInput) => post<Plan>('/workflows/plan', input),
-  create: (input: LaunchInput) => post<{ id: number; items: number; totals: PlanTotals; excluded?: { number: number; reason: ExcludeReason; busy: ChapterBusy | null }[] }>('/workflows', input),
+  create: (input: LaunchInput) => post<{ id: number; ids?: number[]; items: number; totals: PlanTotals; excluded?: { number: number; reason: ExcludeReason; busy: ChapterBusy | null }[] }>('/workflows', input),
   publishPages: (pageIds: string[]) =>
     post<{ id: number; items: number; excluded: { busy: { number: number; busy: ChapterBusy }[]; busyPages: number; locked: number; editing: number; unchanged: number } }>('/review/publish', { pageIds }),
   releaseChapter: (chapterId: string) => post<{ released: number; locks: number }>(`/workflows/chapters/${chapterId}/release`),
