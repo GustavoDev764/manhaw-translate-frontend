@@ -1195,10 +1195,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
             {page.series.title} › Cap. {page.chapter.number} › Página {page.position}
           </div>
         </div>
-        <span className="ml-auto hidden items-center gap-1.5 rounded-full border border-[#3a3a3a] bg-[#1d1d1d] px-2.5 py-1 text-[11px] text-[#a8a8a8] md:flex" title="Todo o processamento roda neste navegador com OpenCV.js; o servidor só recebe a imagem pronta">
-          <span className="size-1.5 rounded-full bg-done" /> OpenCV local · sem custo de CPU/GPU no servidor
-        </span>
-        <button type="button" className="rounded-md px-3 py-1.5 text-[#c8c8c8] hover:bg-[#3a3a3a] hover:text-white disabled:opacity-40" disabled={saving} onClick={() => void close()}>
+        <button type="button" className="ml-auto rounded-md px-3 py-1.5 text-[#c8c8c8] hover:bg-[#3a3a3a] hover:text-white disabled:opacity-40" disabled={saving} onClick={() => void close()}>
           Cancelar
         </button>
         <button
