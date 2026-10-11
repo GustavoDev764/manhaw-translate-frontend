@@ -181,6 +181,7 @@ export function ReviewPage({ pageId }: { pageId: string }) {
   const editing = tab === 'text' && view.kind === 'current' && page.editable
   const readOnlyReason = locked ? null : editLock.holder ? editLock.holder : !can('edit_text') ? DISABLED_REASON : null
   const canEditText = editing && !locked && !editLock.holder && can('edit_text')
+  const canEditBase = !locked && !editLock.holder && can('edit_text')
   const hidingText = hideText && view.kind === 'current' && !!page.cleanAssetId
   const shownImageId = (editing || hidingText) && page.cleanAssetId ? page.cleanAssetId : imageId
 
@@ -299,14 +300,15 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                 </Button>
               ))}
             </div>
-            {editing && page.cleanAssetId && (
+            {page.editable && page.cleanAssetId && view.kind === 'current' && (
               <Button
                 size="sm"
                 variant="ghost"
                 data-testid="base-editor-open"
-                disabled={!canEditText || busy}
-                title={canEditText ? 'Remove texto ou sujeira da imagem de fundo com pincel ou caneta mágica. Roda no navegador (OpenCV), sem custo de CPU/GPU no servidor' : locked ? 'A página está em outro processo' : (readOnlyReason ?? '')}
+                disabled={!canEditBase || busy}
+                title={canEditBase ? 'Remove texto ou sujeira da imagem de fundo com pincel ou caneta mágica. Roda no navegador (OpenCV), sem custo de CPU/GPU no servidor' : locked ? 'A página está em outro processo' : (editLock.holder ?? DISABLED_REASON)}
                 onClick={async () => {
+                  setTab('text')
                   await draft.flush()
                   setBaseEditing(true)
                 }}
