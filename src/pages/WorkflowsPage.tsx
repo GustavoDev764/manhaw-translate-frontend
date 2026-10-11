@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/authCtx'
+import { Pagination } from '../components/Pagination'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Notice, Spinner, Tabs, type Tone } from '../components/ui'
 import { ago, chaptersLabel, num, approxUsd, when } from '../lib/format'
@@ -78,6 +79,9 @@ const BATCH_STATUS: Record<AnthropicBatch['status'], string> = {
 }
 
 type Filter = 'active' | 'failed' | 'done' | 'all'
+type ActiveFilter = 'active' | 'pending' | 'running'
+
+const PAGE_SIZE = 15
 
 function lotsText(l: BatchLots, gpu?: boolean) {
   return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} ${gpu ? 'na GPU' : 'na Anthropic'}` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
@@ -158,8 +162,11 @@ export function ProgressLine({ verb, done, total, prefix }: { verb: string; done
 
 export function WorkflowsPage({ openId }: { openId?: number }) {
   const [filter, setFilter] = useState<Filter>('active')
-  const query = filter === 'all' ? {} : { status: filter }
-  const list = usePolling(() => workflowsApi.list({ ...query, take: 50 }), 0, [filter])
+  const [active, setActive] = useState<ActiveFilter>('active')
+  const [page, setPage] = useState(1)
+  const status = filter === 'all' ? undefined : filter === 'active' ? active : filter
+  const list = usePolling(() => workflowsApi.list({ status, skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE }), 0, [status, page])
+  const pages = list.data ? Math.max(1, Math.ceil(list.data.total / PAGE_SIZE)) : 1
   const detail = usePolling(() => (openId ? workflowsApi.get(openId) : Promise.resolve(null)), 0, [openId])
   useWorkflowEvents((e) => {
     void list.reload()
@@ -174,7 +181,11 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
       </div>
       <Tabs<Filter>
         value={filter}
-        onChange={setFilter}
+        onChange={(f) => {
+          setFilter(f)
+          setActive('active')
+          setPage(1)
+        }}
         tabs={[
           { value: 'active', label: 'Em andamento' },
           { value: 'failed', label: 'Com falha' },
@@ -182,13 +193,37 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
           { value: 'all', label: 'Todos' },
         ]}
       />
+      {filter === 'active' && (
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ['active', 'Todos'],
+              ['pending', WF_STATUS.pending.label],
+              ['running', WF_STATUS.running.label],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={active === value ? 'primary' : 'secondary'}
+              onClick={() => {
+                setActive(value)
+                setPage(1)
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
       {list.error && <Notice tone="failed">{list.error}</Notice>}
       {!list.data && !list.error && (
         <EmptyState>
           <Spinner /> Carregando…
         </EmptyState>
       )}
-      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : filter === 'failed' ? 'Nenhum workflow com falha.' : filter === 'done' ? 'Nenhum workflow concluído.' : 'Nenhum workflow.'}</EmptyState>}
+      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? (active === 'pending' ? 'Nenhum workflow na fila.' : 'Nenhum workflow em andamento.') : filter === 'failed' ? 'Nenhum workflow com falha.' : filter === 'done' ? 'Nenhum workflow concluído.' : 'Nenhum workflow.'}</EmptyState>}
+      {list.data && !list.data.rows.length && page > 1 && <Pagination page={page} pages={pages} total={list.data.total} noun={['workflow', 'workflows']} onChange={setPage} />}
       {list.data && list.data.rows.length > 0 && (
         <Card className="divide-y divide-slate-100 dark:divide-slate-800">
           {list.data.rows.map((w) => {
@@ -222,6 +257,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
               </a>
             )
           })}
+          <Pagination page={page} pages={pages} total={list.data.total} noun={['workflow', 'workflows']} onChange={setPage} />
         </Card>
       )}
       {openId && <WorkflowDetailPanel id={openId} detail={detail.data} error={detail.error} reload={detail.reload} />}
