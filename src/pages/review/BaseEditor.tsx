@@ -1410,7 +1410,6 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                   <>
                     <Spinner className="size-6 text-brand" />
                     <span className="font-medium text-white">Preparando o editor</span>
-                    <span className="text-xs text-[#9a9a9a]">Carregando o OpenCV (~4 MB, só na primeira vez) e a imagem base.</span>
                   </>
                 )}
               </div>
