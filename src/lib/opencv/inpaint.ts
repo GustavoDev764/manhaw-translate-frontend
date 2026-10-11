@@ -2,12 +2,13 @@ import type { CV } from './opencv'
 
 type Mat = InstanceType<CV['Mat']>
 
-export type Method = 'auto' | 'telea' | 'ns' | 'fill'
+export type Method = 'auto' | 'patchmatch' | 'telea' | 'ns' | 'fill'
 
-type ResolvedMethod = Exclude<Method, 'auto'>
+type ResolvedMethod = Exclude<Method, 'auto' | 'patchmatch'>
 
 export const METHOD_LABEL: Record<Method, string> = {
   auto: 'Automático',
+  patchmatch: 'PatchMatch (inteligente)',
   telea: 'Telea',
   ns: 'Navier-Stokes',
   fill: 'Cor da borda',
@@ -166,7 +167,7 @@ function removeInRect(cv: CV, imageCanvas: HTMLCanvasElement, mask: Mat, box: Bo
   cv.subtract(ring, mask, ring)
   kernel.delete()
 
-  let used: ResolvedMethod = method === 'auto' ? 'telea' : method
+  let used: ResolvedMethod = method === 'auto' || method === 'patchmatch' ? 'telea' : method
   if (method === 'auto') {
     const mean = new cv.Mat()
     const stddev = new cv.Mat()
@@ -229,6 +230,30 @@ export function applyRemoval(
   roi.delete()
   mask.delete()
   return { ms: performance.now() - started, pixels, box }
+}
+
+export function readMaskRegion(cv: CV, maskCanvas: HTMLCanvasElement, dilate: number, margin: (box: Box) => number): { box: Box; hole: Uint8Array; pixels: number } | null {
+  const mask = readMask(cv, maskCanvas)
+  dilateInPlace(cv, mask, dilate)
+  const found = nonZeroBox(mask)
+  if (!found) {
+    mask.delete()
+    return null
+  }
+  const box = padBox(found, margin(found), mask.cols, mask.rows)
+  const data = mask.data as Uint8Array
+  const hole = new Uint8Array(box.width * box.height)
+  let pixels = 0
+  for (let row = 0; row < box.height; row++) {
+    const src = (box.y + row) * mask.cols + box.x
+    for (let col = 0; col < box.width; col++) {
+      if (!data[src + col]) continue
+      hole[row * box.width + col] = 1
+      pixels++
+    }
+  }
+  mask.delete()
+  return { box, hole, pixels }
 }
 
 export interface WandResult {

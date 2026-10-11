@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { useConfirm } from '../../components/confirm'
 import { Button, Dialog, Spinner } from '../../components/ui'
 import { cx } from '../../lib/cx'
-import { applyRemoval, magicWand, maskPixelCount, MASK_COLOR, METHOD_LABEL, WandError, type Method } from '../../lib/opencv/inpaint'
+import { applyRemoval, magicWand, maskPixelCount, MASK_COLOR, METHOD_LABEL, readMaskRegion, WandError, type Method } from '../../lib/opencv/inpaint'
+import { runPatchMatch } from '../../lib/patchmatch'
 import { loadOpenCv, type CV } from '../../lib/opencv/opencv'
 import { reviewApi, type ReviewPage } from '../../reviewApi'
 import { blankCanvas, ctx2d, flatten, FUNDO, layerFromSnap, mountCanvas, newLayerId, snapLayer, type Layer, type LayerSnap } from './baseLayers'
@@ -21,6 +22,8 @@ const MIN_CROP = 8
 const CROP_CURSOR: Record<string, string> = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize', move: 'move' }
 
 const HISTORY_LIMIT = 8
+const PATCHMATCH_MIN_MARGIN = 48
+const PATCHMATCH_MAX_MARGIN = 256
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
@@ -291,6 +294,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [history, setHistory] = useState<{ done: string[]; undone: string[]; dropped: boolean }>({ done: [], undone: [], dropped: false })
   const [status, setStatus] = useState<{ text: string; error?: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [processing, setProcessing] = useState(false)
   const [showKeys, setShowKeys] = useState(false)
   const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null)
   const [origin, setOriginState] = useState<Point>({ x: 0, y: 0 })
@@ -477,8 +481,35 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     if (cv && maskRef.current) setMaskPixels(maskPixelCount(cv, maskRef.current))
   }
 
+  const applyPatchMatch = async () => {
+    if (!cv || !imageRef.current || !maskRef.current || processing) return
+    const region = readMaskRegion(cv, maskRef.current, dilate, (b) => Math.min(PATCHMATCH_MAX_MARGIN, Math.max(PATCHMATCH_MIN_MARGIN, Math.round(Math.max(b.width, b.height) * 0.75))))
+    if (!region) {
+      setStatus({ text: 'Pinte uma máscara (ou use a caneta mágica) antes de remover.', error: true })
+      return
+    }
+    const { box, hole, pixels } = region
+    const before = snapshot()
+    const source = maskSource.current
+    const started = performance.now()
+    setProcessing(true)
+    setStatus({ text: `PatchMatch: procurando textura parecida… 0%` })
+    try {
+      const out = await runPatchMatch(imageCtx().getImageData(box.x, box.y, box.width, box.height), hole, {}, (done) => setStatus({ text: `PatchMatch: procurando textura parecida… ${Math.round(done * 100)}%` }))
+      imageCtx().putImageData(out, box.x, box.y)
+      pushUndo(before, `${source} · PatchMatch`)
+      clearMask()
+      setStatus({ text: `PatchMatch · ${pixels.toLocaleString('pt-BR')} px reconstruídos · área ${box.width}×${box.height} · ${((performance.now() - started) / 1000).toFixed(1)} s` })
+    } catch (err) {
+      setStatus({ text: `PatchMatch falhou: ${err instanceof Error ? err.message : String(err)}`, error: true })
+    } finally {
+      setProcessing(false)
+    }
+  }
+
   const apply = () => {
-    if (!cv || !imageRef.current || !maskRef.current) return
+    if (method === 'patchmatch') return void applyPatchMatch()
+    if (!cv || !imageRef.current || !maskRef.current || processing) return
     const before = snapshot()
     const result = applyRemoval(cv, imageRef.current, maskRef.current, { method, radius, dilate })
     if (!result) {
@@ -779,10 +810,12 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   }
 
   const undo = () => {
+    if (processing) return
     if (swap(undoStack.current, redoStack.current)) syncHistory()
   }
 
   const redo = () => {
+    if (processing) return
     if (swap(redoStack.current, undoStack.current)) syncHistory()
   }
 
@@ -854,7 +887,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const handActive = tool === 'hand' || spaceHeld
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if ((e.button !== 0 && e.button !== 1) || !cv || !imageRef.current || !maskRef.current || saving) return
+    if ((e.button !== 0 && e.button !== 1) || !cv || !imageRef.current || !maskRef.current || saving || processing) return
     if (handActive || e.button === 1) {
       const vp = viewportRef.current
       if (!vp) return
@@ -1171,7 +1204,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-1.5 font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!ready || !dirty || saving || !fundoVisible}
+          disabled={!ready || !dirty || saving || processing || !fundoVisible}
           title={!fundoVisible ? 'Mostre a camada Fundo para salvar' : dirty ? 'Salva a imagem (camadas visíveis juntas) como uma versão nova da base e redesenha as caixas de texto por cima' : 'Faça alguma alteração antes de salvar'}
           onClick={() => void save()}
         >
@@ -1522,7 +1555,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                 </select>
               </label>
               <div className="flex justify-end">
-                <Opt label="Raio" value={radius} min={1} max={25} disabled={method === 'fill'} onChange={setRadius} />
+                <Opt label="Raio" value={radius} min={1} max={25} disabled={method === 'fill' || method === 'patchmatch'} onChange={setRadius} />
               </div>
               <div className="flex justify-end">
                 <Opt label="Expandir" value={dilate} min={0} max={12} suffix="px" onChange={setDilate} />
@@ -1532,8 +1565,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                 <span className={cx('tabular-nums', maskPixels ? 'text-white' : 'text-[#777]')}>{maskPixels.toLocaleString('pt-BR')} px</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" className="rounded-md bg-brand px-3 py-1.5 font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" disabled={!ready || !maskPixels} title="Enter" onClick={apply}>
-                  Remover
+                <button type="button" className="rounded-md bg-brand px-3 py-1.5 font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" disabled={!ready || !maskPixels || processing} title="Enter" onClick={apply}>
+                  {processing ? <Spinner className="size-3.5" /> : 'Remover'}
                 </button>
                 <button type="button" className="rounded-md border border-[#444] px-3 py-1.5 text-[#d6d6d6] hover:bg-[#3a3a3a] disabled:cursor-not-allowed disabled:opacity-40" disabled={!maskPixels} title="Esc" onClick={clearMask}>
                   Limpar máscara
