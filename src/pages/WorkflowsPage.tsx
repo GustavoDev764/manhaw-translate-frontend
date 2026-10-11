@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/authCtx'
 import { Pagination } from '../components/Pagination'
+import { useConfirm } from '../components/confirm'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Notice, Spinner, Tabs, type Tone } from '../components/ui'
 import { ago, chaptersLabel, num, approxUsd, when } from '../lib/format'
@@ -272,6 +273,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
   const { me } = useAuth()
   const [errorOf, setErrorOf] = useState<ItemError | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [ask, confirmDialog] = useConfirm()
   const act = async (key: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(key)
     try {
@@ -287,13 +289,28 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
   const close = () => {
     navigate(backTo)
   }
+  const cancel = async () => {
+    const ok = await ask({
+      title: `Cancelar workflow #${id}`,
+      message: (
+        <>
+          <p>Os capítulos que ainda não terminaram param agora e as páginas são liberadas. O que já ficou pronto continua salvo.</p>
+          {detail?.type === 'translate' && <p>Lotes que já foram enviados para a tradução continuam rodando lá até o fim, mas o resultado é descartado.</p>}
+          <p>Para refazer depois, é preciso iniciar a etapa de novo.</p>
+        </>
+      ),
+      confirmLabel: 'Cancelar workflow',
+      danger: true,
+    })
+    if (ok) await act('cancel', () => workflowsApi.cancel(id), `Workflow #${id} cancelado.`)
+  }
 
   return (
     <Dialog open onClose={close} wide title={detail ? `Workflow #${id} · ${detail.label}` : `Workflow #${id}`}
       footer={
         <>
           {detail && ['pending', 'running'].includes(detail.status) && (
-            <Button variant="danger" disabled={busy === 'cancel'} onClick={() => act('cancel', () => workflowsApi.cancel(id), `Workflow #${id} cancelado.`)}>
+            <Button variant="danger" disabled={busy === 'cancel'} onClick={cancel}>
               Cancelar workflow
             </Button>
           )}
@@ -378,6 +395,7 @@ export function WorkflowDetailPanel({ id, detail, error, reload, backTo = href('
           </div>
         )}
       </Dialog>
+      {confirmDialog}
     </Dialog>
   )
 }
