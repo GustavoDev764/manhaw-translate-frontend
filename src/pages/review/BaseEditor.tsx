@@ -7,7 +7,7 @@ import { applyRemoval, magicWand, maskPixelCount, MASK_COLOR, METHOD_LABEL, Wand
 import { loadOpenCv, type CV } from '../../lib/opencv/opencv'
 import { reviewApi, type ReviewPage } from '../../reviewApi'
 
-type Tool = 'brush' | 'eraser' | 'wand' | 'crop' | 'hand'
+type Tool = 'brush' | 'imageEraser' | 'eraser' | 'wand' | 'crop' | 'hand'
 type Point = { x: number; y: number }
 type Rect = { x: number; y: number; w: number; h: number }
 type Step = { before: ImageData; origin: Point; label: string }
@@ -21,7 +21,9 @@ const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
 
-const stepIcon = (label: string) => (label.startsWith('Caneta') ? ICONS.wand : label.startsWith('Recorte') ? ICONS.crop : label.startsWith('Importada') ? ICONS.upload : ICONS.brush)
+const stepIcon = (label: string) =>
+  label.startsWith('Caneta') ? ICONS.wand : label.startsWith('Recorte') ? ICONS.crop : label.startsWith('Importada') ? ICONS.upload : label.startsWith('Borracha') ? ICONS.imageEraser : ICONS.brush
+const toHex = (r: number, g: number, b: number) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
 const mimeOf = (file: string) => MIME[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'image/png'
 const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
 
@@ -53,11 +55,19 @@ const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 
       <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
     </>
   ),
-  eraser: (
+  imageEraser: (
     <>
       <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
       <path d="M22 21H7" />
       <path d="m5 11 9 9" />
+    </>
+  ),
+  eraser: (
+    <>
+      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+      <path d="m5 11 9 9" />
+      <path d="M16 21h6" strokeDasharray="1.5 2" />
+      <circle cx="19" cy="5" r="2.5" fill="currentColor" stroke="none" opacity="0.6" />
     </>
   ),
   wand: (
@@ -125,14 +135,17 @@ const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 
 
 const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
   { tool: 'brush', label: 'Pincel', key: 'B', hint: 'Pinte por cima do que quer remover' },
-  { tool: 'eraser', label: 'Borracha de máscara', key: 'E', hint: 'Tira o vermelho onde a máscara passou do ponto; não apaga a imagem (para isso, pinte com o Pincel e clique em Remover)' },
+  { tool: 'imageEraser', label: 'Borracha de imagem', key: 'E', hint: 'Apaga direto na imagem pintando com a cor escolhida (Alt+clique pega a cor da imagem)' },
+  { tool: 'eraser', label: 'Borracha de máscara', key: 'M', hint: 'Tira o vermelho onde a máscara passou do ponto; não apaga a imagem (para isso, pinte com o Pincel e clique em Remover)' },
   { tool: 'wand', label: 'Caneta mágica', key: 'W', hint: 'Clique na parte clara de um balão: marca só as letras dele' },
   { tool: 'crop', label: 'Recorte', key: 'R', hint: 'Arraste para escolher a área que fica; o resto da imagem é cortado (Enter aplica)' },
   { tool: 'hand', label: 'Mão', key: 'H', hint: 'Arraste para mover a imagem (ou segure Espaço)' },
 ]
 
 const SHORTCUTS: [string, string][] = [
-  ['B / E / W / R / H', 'Pincel, borracha, caneta, recorte, mão'],
+  ['B / E / M', 'Pincel, borracha de imagem, borracha de máscara'],
+  ['W / R / H', 'Caneta mágica, recorte, mão'],
+  ['Alt+clique', 'Pegar a cor da imagem (borracha de imagem)'],
   ['[ e ]', 'Diminuir / aumentar pincel'],
   ['Enter', 'Remover a máscara / aplicar o recorte'],
   ['Esc', 'Limpar a máscara / desfazer a seleção do recorte'],
@@ -212,6 +225,10 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [panning, setPanning] = useState(false)
   const [brush, setBrush] = useState(24)
+  const [paint, setPaint] = useState('#ffffff')
+  const [eraserKind, setEraserKind] = useState<'imageEraser' | 'eraser'>('imageEraser')
+  const [eraserMenu, setEraserMenu] = useState(false)
+  const eraserGroupRef = useRef<HTMLDivElement>(null)
   const [method, setMethod] = useState<Method>('auto')
   const [radius, setRadius] = useState(5)
   const [dilate, setDilate] = useState(2)
@@ -345,8 +362,19 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
 
   const pickTool = (t: Tool) => {
     setTool(t)
+    if (t === 'imageEraser' || t === 'eraser') setEraserKind(t)
     if (t !== 'crop') setCrop(null)
+    setEraserMenu(false)
   }
+
+  useEffect(() => {
+    if (!eraserMenu) return
+    const outside = (e: PointerEvent) => {
+      if (!eraserGroupRef.current?.contains(e.target as Node)) setEraserMenu(false)
+    }
+    window.addEventListener('pointerdown', outside)
+    return () => window.removeEventListener('pointerdown', outside)
+  }, [eraserMenu])
 
   const pushUndo = (before: ImageData, label: string) => {
     undoStack.current.push({ before, origin: originRef.current, label })
@@ -537,9 +565,10 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   }
 
   const strokeTo = (from: Point, to: Point) => {
-    const ctx = maskCtx()
+    const onImage = tool === 'imageEraser'
+    const ctx = onImage ? imageCtx() : maskCtx()
     ctx.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over'
-    ctx.strokeStyle = `rgb(${MASK_COLOR.join(',')})`
+    ctx.strokeStyle = onImage ? paint : `rgb(${MASK_COLOR.join(',')})`
     ctx.lineWidth = brush
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
@@ -585,8 +614,18 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     }
     if (tool === 'brush') maskSource.current = 'Pincel'
     if (tool === 'eraser' && !maskPixels) {
-      setStatus({ text: 'A borracha só apaga a máscara vermelha. Para apagar algo da imagem, pinte com o Pincel (B) e clique em Remover (Enter).', error: true })
+      setStatus({ text: 'A borracha de máscara só apaga o vermelho. Para apagar a imagem, use a Borracha de imagem (E) ou pinte com o Pincel (B) e clique em Remover.', error: true })
       return
+    }
+    if (tool === 'imageEraser') {
+      if (e.altKey) {
+        const [r, g, b] = imageCtx().getImageData(point.x, point.y, 1, 1).data
+        const hex = toHex(r, g, b)
+        setPaint(hex)
+        setStatus({ text: `Cor da borracha: ${hex}` })
+        return
+      }
+      pushUndo(fullImage(), 'Borracha de imagem')
     }
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = point
@@ -670,7 +709,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       } else if (mod || e.altKey) {
         return
       } else if (k === 'b') pickTool('brush')
-      else if (k === 'e') pickTool('eraser')
+      else if (k === 'e') pickTool('imageEraser')
+      else if (k === 'm') pickTool('eraser')
       else if (k === 'w') pickTool('wand')
       else if (k === 'r') pickTool('crop')
       else if (k === 'h') pickTool('hand')
@@ -715,7 +755,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const cursorSize = brush * zoom
   const active = TOOLS.find((t) => t.tool === tool)!
   const ext = (page.file.split('.').pop() ?? '').toUpperCase()
-  const showBrushCursor = (tool === 'brush' || tool === 'eraser') && !handActive
+  const showBrushCursor = (tool === 'brush' || tool === 'eraser' || tool === 'imageEraser') && !handActive
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-[#1e1e1e] text-[13px] text-[#d6d6d6]" data-testid="base-editor">
@@ -807,7 +847,33 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
           {active.label}
         </span>
         <Divider />
-        {(tool === 'brush' || tool === 'eraser') && <Opt label="Tamanho" value={brush} min={2} max={160} suffix="px" onChange={setBrush} title="Atalhos: [ e ]" wide />}
+        {(tool === 'eraser' || tool === 'imageEraser') && (
+          <>
+            <span className="inline-flex rounded-md bg-[#1d1d1d] p-0.5" role="radiogroup" aria-label="Tipo de borracha">
+              {(['imageEraser', 'eraser'] as const).map((kind) => (
+                <button key={kind} type="button" role="radio" aria-checked={tool === kind} onClick={() => pickTool(kind)} className={cx('whitespace-nowrap rounded px-2 py-0.5', tool === kind ? 'bg-[#4b4b4b] text-white' : 'text-[#a8a8a8] hover:text-white')}>
+                  {kind === 'imageEraser' ? 'Imagem' : 'Máscara'}
+                </button>
+              ))}
+            </span>
+            <Divider />
+          </>
+        )}
+        {(tool === 'brush' || tool === 'eraser' || tool === 'imageEraser') && <Opt label="Tamanho" value={brush} min={2} max={160} suffix="px" onChange={setBrush} title="Atalhos: [ e ]" wide />}
+        {tool === 'imageEraser' && (
+          <>
+            <Divider />
+            <label className="flex items-center gap-2 whitespace-nowrap" title="Cor usada para apagar. Alt+clique na imagem pega a cor do ponto">
+              <span className="text-[#a8a8a8]">Cor</span>
+              <input type="color" className="h-6 w-8 cursor-pointer rounded border border-[#3f3f3f] bg-transparent p-0" value={paint} onChange={(e) => setPaint(e.target.value)} />
+              <span className="tabular-nums text-[#c8c8c8]">{paint}</span>
+            </label>
+            {['#ffffff', '#000000'].map((c) => (
+              <button key={c} type="button" title={c === '#ffffff' ? 'Branco' : 'Preto'} aria-label={c === '#ffffff' ? 'Branco' : 'Preto'} onClick={() => setPaint(c)} className={cx('size-5 rounded border', paint === c ? 'border-brand ring-1 ring-brand' : 'border-[#555]')} style={{ background: c }} />
+            ))}
+            <span className="whitespace-nowrap text-[#8a8a8a]">Alt+clique pega a cor</span>
+          </>
+        )}
         {tool === 'wand' && (
           <>
             <Opt label="Limiar do branco" value={threshold} min={60} max={250} onChange={setThreshold} title="Quanto mais alto, mais clara a área precisa ser para contar como fundo do balão" />
@@ -848,9 +914,58 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
 
       <div className="flex min-h-0 flex-1">
         <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-[#111] bg-[#2b2b2b] py-2" aria-label="Ferramentas">
-          {TOOLS.map((t) => (
-            <IconButton key={t.tool} icon={ICONS[t.tool]} label={`${t.label} (${t.key})`} active={tool === t.tool} onClick={() => pickTool(t.tool)} />
-          ))}
+          {TOOLS.filter((t) => t.tool !== 'eraser').map((t) => {
+            if (t.tool !== 'imageEraser') return <IconButton key={t.tool} icon={ICONS[t.tool]} label={`${t.label} (${t.key})`} active={tool === t.tool} onClick={() => pickTool(t.tool)} />
+            const isEraser = tool === 'imageEraser' || tool === 'eraser'
+            const current = TOOLS.find((x) => x.tool === eraserKind)!
+            return (
+              <div key="eraser-group" ref={eraserGroupRef} className="relative">
+                <IconButton
+                  icon={ICONS[eraserKind]}
+                  label={`${current.label} (${current.key}). Clique de novo ou com o botão direito para escolher o tipo de borracha`}
+                  active={isEraser}
+                  aria-haspopup="menu"
+                  aria-expanded={eraserMenu}
+                  onClick={() => (isEraser ? setEraserMenu(!eraserMenu) : pickTool(eraserKind))}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setEraserMenu(true)
+                  }}
+                />
+                <svg viewBox="0 0 6 6" className="pointer-events-none absolute bottom-1 right-1 size-1.5 fill-[#c8c8c8]" aria-hidden>
+                  <path d="M6 0v6H0Z" />
+                </svg>
+                {eraserMenu && (
+                  <div role="menu" aria-label="Tipo de borracha" className="absolute left-full top-0 z-30 ml-2 w-72 overflow-hidden rounded-md border border-[#111] bg-[#2f2f2f] py-1 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
+                    <div className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#8a8a8a]">Borracha</div>
+                    {(['imageEraser', 'eraser'] as const).map((kind) => {
+                      const item = TOOLS.find((x) => x.tool === kind)!
+                      return (
+                        <button
+                          key={kind}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={eraserKind === kind}
+                          onClick={() => pickTool(kind)}
+                          className={cx('flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-[#3d4b63]', eraserKind === kind && 'bg-[#383838]')}
+                        >
+                          <span className="mt-0.5 w-3 text-[11px] text-white">{eraserKind === kind ? '■' : ''}</span>
+                          <Svg className="mt-0.5 size-4 shrink-0">{ICONS[kind]}</Svg>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center justify-between gap-2 text-white">
+                              {item.label}
+                              <kbd className="text-[10px] text-[#9a9a9a]">{item.key}</kbd>
+                            </span>
+                            <span className="block text-[11px] leading-snug text-[#9a9a9a]">{kind === 'imageEraser' ? 'Apaga na imagem pintando com uma cor (Alt+clique pega a cor)' : 'Tira o vermelho da máscara; não mexe na imagem'}</span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
           <span className="my-1 h-px w-7 bg-[#3f3f3f]" />
           <IconButton icon={ICONS.upload} label="Importar imagem: envia um arquivo que substitui a base" disabled={!ready || saving} onClick={() => fileRef.current?.click()} />
           <input
