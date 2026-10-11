@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useConfirm } from '../../components/confirm'
-import { Spinner } from '../../components/ui'
+import { Button, Dialog, Spinner } from '../../components/ui'
 import { cx } from '../../lib/cx'
 import { applyRemoval, magicWand, maskPixelCount, MASK_COLOR, METHOD_LABEL, WandError, type Method } from '../../lib/opencv/inpaint'
 import { loadOpenCv, type CV } from '../../lib/opencv/opencv'
 import { reviewApi, type ReviewPage } from '../../reviewApi'
 
-type Tool = 'brush' | 'eraser' | 'wand' | 'hand'
+type Tool = 'brush' | 'eraser' | 'wand' | 'crop' | 'hand'
 type Point = { x: number; y: number }
-type Step = { before: ImageData; label: string }
+type Rect = { x: number; y: number; w: number; h: number }
+type Step = { before: ImageData; origin: Point; label: string }
+type CropDrag = { mode: string; start: Point; rect: Rect }
+
+const MIN_CROP = 8
+const CROP_CURSOR: Record<string, string> = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize', move: 'move' }
 
 const HISTORY_LIMIT = 8
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
 
+const stepIcon = (label: string) => (label.startsWith('Caneta') ? ICONS.wand : label.startsWith('Recorte') ? ICONS.crop : label.startsWith('Importada') ? ICONS.upload : ICONS.brush)
 const mimeOf = (file: string) => MIME[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'image/png'
 const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
 
@@ -27,7 +33,20 @@ function Svg({ children, className }: { children: ReactNode; className?: string 
   )
 }
 
-const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 'fit', ReactNode> = {
+const ICONS: Record<Tool | 'compare' | 'undo' | 'redo' | 'zoomIn' | 'zoomOut' | 'fit' | 'upload', ReactNode> = {
+  crop: (
+    <>
+      <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+      <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+    </>
+  ),
+  upload: (
+    <>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m17 8-5-5-5 5" />
+      <path d="M12 3v12" />
+    </>
+  ),
   brush: (
     <>
       <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
@@ -108,14 +127,15 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
   { tool: 'brush', label: 'Pincel', key: 'B', hint: 'Pinte por cima do que quer remover' },
   { tool: 'eraser', label: 'Borracha', key: 'E', hint: 'Apaga partes da máscara pintada' },
   { tool: 'wand', label: 'Caneta mágica', key: 'W', hint: 'Clique na parte clara de um balão: marca só as letras dele' },
+  { tool: 'crop', label: 'Recorte', key: 'R', hint: 'Arraste para escolher a área que fica; o resto da imagem é cortado (Enter aplica)' },
   { tool: 'hand', label: 'Mão', key: 'H', hint: 'Arraste para mover a imagem (ou segure Espaço)' },
 ]
 
 const SHORTCUTS: [string, string][] = [
-  ['B / E / W / H', 'Pincel, borracha, caneta, mão'],
+  ['B / E / W / R / H', 'Pincel, borracha, caneta, recorte, mão'],
   ['[ e ]', 'Diminuir / aumentar pincel'],
-  ['Enter', 'Remover a máscara'],
-  ['Esc', 'Limpar a máscara'],
+  ['Enter', 'Remover a máscara / aplicar o recorte'],
+  ['Esc', 'Limpar a máscara / desfazer a seleção do recorte'],
   ['Ctrl+Z / Ctrl+Y', 'Desfazer / refazer'],
   ['Espaço', 'Mover a imagem'],
   ['Ctrl+roda, Ctrl + / −', 'Zoom'],
@@ -206,7 +226,15 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   const [status, setStatus] = useState<{ text: string; error?: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
   const [showKeys, setShowKeys] = useState(false)
+  const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null)
+  const [origin, setOriginState] = useState<Point>({ x: 0, y: 0 })
+  const [crop, setCrop] = useState<Rect | null>(null)
+  const [cropCursor, setCropCursor] = useState('crosshair')
+  const [importing, setImporting] = useState<{ bitmap: ImageBitmap; name: string } | null>(null)
   const [ask, confirmDialog] = useConfirm()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const originRef = useRef<Point>({ x: 0, y: 0 })
+  const cropDrag = useRef<CropDrag | null>(null)
   const imageRef = useRef<HTMLCanvasElement>(null)
   const maskRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -256,6 +284,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         bitmap.close()
         url = URL.createObjectURL(blob)
         setSourceUrl(url)
+        setSourceSize({ width: image.width, height: image.height })
         setSize({ width: image.width, height: image.height })
         fitZoom(image.width, image.height)
         setCv(cv)
@@ -300,8 +329,27 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     return imageCtx().getImageData(0, 0, canvas.width, canvas.height)
   }
 
+  const setOrigin = (p: Point) => {
+    originRef.current = p
+    setOriginState(p)
+  }
+
+  const resizeCanvases = (width: number, height: number) => {
+    const image = imageRef.current!
+    const mask = maskRef.current!
+    image.width = mask.width = width
+    image.height = mask.height = height
+    setSize({ width, height })
+    setMaskPixels(0)
+  }
+
+  const pickTool = (t: Tool) => {
+    setTool(t)
+    if (t !== 'crop') setCrop(null)
+  }
+
   const pushUndo = (before: ImageData, label: string) => {
-    undoStack.current.push({ before, label })
+    undoStack.current.push({ before, origin: originRef.current, label })
     if (undoStack.current.length > HISTORY_LIMIT) {
       undoStack.current.shift()
       dropped.current = true
@@ -336,10 +384,108 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
 
   const swap = (from: Step[], to: Step[]) => {
     const step = from.pop()
-    if (!step || !imageRef.current) return false
-    to.push({ before: fullImage(), label: step.label })
+    const image = imageRef.current
+    if (!step || !image) return false
+    to.push({ before: fullImage(), origin: originRef.current, label: step.label })
+    if (step.before.width !== image.width || step.before.height !== image.height) resizeCanvases(step.before.width, step.before.height)
     imageCtx().putImageData(step.before, 0, 0)
+    setOrigin(step.origin)
+    setCrop(null)
     return true
+  }
+
+  const applyCrop = () => {
+    const c = crop
+    const image = imageRef.current
+    if (!c || !image) return
+    if (c.w < MIN_CROP || c.h < MIN_CROP) {
+      setStatus({ text: 'Arraste sobre a imagem para escolher a área que fica.', error: true })
+      return
+    }
+    if (c.x === 0 && c.y === 0 && c.w === image.width && c.h === image.height) {
+      setCrop(null)
+      return
+    }
+    const before = fullImage()
+    const piece = imageCtx().getImageData(c.x, c.y, c.w, c.h)
+    pushUndo(before, `Recorte ${c.w}×${c.h}`)
+    resizeCanvases(c.w, c.h)
+    imageCtx().putImageData(piece, 0, 0)
+    setOrigin({ x: originRef.current.x + c.x, y: originRef.current.y + c.y })
+    setCrop(null)
+    fitZoom(c.w, c.h)
+    setStatus({ text: `Recortada para ${c.w} × ${c.h} px. As caixas de texto vão ser movidas junto ao salvar.` })
+  }
+
+  const replaceWith = (bitmap: ImageBitmap, name: string, keepSize: boolean) => {
+    const image = imageRef.current
+    if (!image) return bitmap.close()
+    const before = fullImage()
+    const width = keepSize ? image.width : bitmap.width
+    const height = keepSize ? image.height : bitmap.height
+    pushUndo(before, `Importada: ${name}`)
+    if (width !== image.width || height !== image.height) resizeCanvases(width, height)
+    clearMask()
+    const ctx = imageCtx()
+    ctx.clearRect(0, 0, width, height)
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close()
+    setOrigin({ x: 0, y: 0 })
+    setCrop(null)
+    fitZoom(width, height)
+    setStatus({ text: `Imagem "${name}" importada (${width} × ${height} px). Salve para ela virar a base.` })
+  }
+
+  const importFile = async (file: File) => {
+    try {
+      const bitmap = await createImageBitmap(file)
+      const image = imageRef.current
+      if (image && bitmap.width === image.width && bitmap.height === image.height) replaceWith(bitmap, file.name, true)
+      else setImporting({ bitmap, name: file.name })
+    } catch {
+      setStatus({ text: `Não consegui abrir "${file.name}". Use PNG, JPEG ou WebP.`, error: true })
+    }
+  }
+
+  const cropHit = (p: Point, c: Rect): string | null => {
+    const t = 10 / zoom
+    const inX = p.x >= c.x - t && p.x <= c.x + c.w + t
+    const inY = p.y >= c.y - t && p.y <= c.y + c.h + t
+    let h = ''
+    if (inX && Math.abs(p.y - c.y) <= t) h += 'n'
+    if (inX && Math.abs(p.y - (c.y + c.h)) <= t) h += 's'
+    if (inY && Math.abs(p.x - c.x) <= t) h += 'w'
+    if (inY && Math.abs(p.x - (c.x + c.w)) <= t) h += 'e'
+    if (h) return h
+    return p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h ? 'move' : null
+  }
+
+  const dragCrop = (p: Point) => {
+    const d = cropDrag.current
+    const canvas = imageRef.current
+    if (!d || !canvas) return
+    const W = canvas.width
+    const H = canvas.height
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+    if (d.mode === 'draw') {
+      const x = Math.min(d.start.x, p.x)
+      const y = Math.min(d.start.y, p.y)
+      setCrop({ x, y, w: Math.abs(p.x - d.start.x), h: Math.abs(p.y - d.start.y) })
+      return
+    }
+    const dx = p.x - d.start.x
+    const dy = p.y - d.start.y
+    const r = d.rect
+    if (d.mode === 'move') {
+      setCrop({ ...r, x: clamp(r.x + dx, 0, W - r.w), y: clamp(r.y + dy, 0, H - r.h) })
+      return
+    }
+    let [x1, y1, x2, y2] = [r.x, r.y, r.x + r.w, r.y + r.h]
+    if (d.mode.includes('w')) x1 = clamp(x1 + dx, 0, x2 - MIN_CROP)
+    if (d.mode.includes('e')) x2 = clamp(x2 + dx, x1 + MIN_CROP, W)
+    if (d.mode.includes('n')) y1 = clamp(y1 + dy, 0, y2 - MIN_CROP)
+    if (d.mode.includes('s')) y2 = clamp(y2 + dy, y1 + MIN_CROP, H)
+    setCrop({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 })
   }
 
   const undo = () => {
@@ -373,8 +519,8 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     setStatus({ text: 'Enviando a base editada…' })
     try {
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Não consegui gerar a imagem.'))), mimeOf(page.file), 0.95))
-      const r = await reviewApi.saveBase(page.id, blob)
-      onSaved(`Base salva (limpa v${r.version}). As caixas de texto vão ser desenhadas por cima numa versão nova.`)
+      const r = await reviewApi.saveBase(page.id, blob, originRef.current)
+      onSaved(`Base salva (limpa v${r.version}).${r.shiftedLayers ? ` ${r.shiftedLayers} caixas de texto movidas junto com o recorte.` : ''} As caixas de texto vão ser desenhadas por cima numa versão nova.`)
     } catch (err) {
       setStatus({ text: err instanceof Error ? err.message : String(err), error: true })
       setSaving(false)
@@ -417,6 +563,13 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       return
     }
     const point = toImagePoint(e)
+    if (tool === 'crop') {
+      e.currentTarget.setPointerCapture(e.pointerId)
+      const hit = crop ? cropHit(point, crop) : null
+      cropDrag.current = { mode: hit ?? 'draw', start: point, rect: crop ?? { x: point.x, y: point.y, w: 0, h: 0 } }
+      if (!hit) setCrop({ x: point.x, y: point.y, w: 0, h: 0 })
+      return
+    }
     if (tool === 'wand') {
       try {
         const result = magicWand(cv, imageRef.current, maskRef.current, point.x, point.y, { threshold, closeSize: wandClose, dilate: wandDilate })
@@ -450,6 +603,16 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
       vp.scrollTop = pan.current.top - (e.clientY - pan.current.y)
       return
     }
+    if (tool === 'crop') {
+      const p = toImagePoint(e)
+      if (cropDrag.current) dragCrop(p)
+      else {
+        const hit = crop ? cropHit(p, crop) : null
+        const next = hit ? CROP_CURSOR[hit] : 'crosshair'
+        if (next !== cropCursor) setCropCursor(next)
+      }
+      return
+    }
     if (!drawing.current) return
     const point = toImagePoint(e)
     strokeTo(drawing.current, point)
@@ -460,6 +623,11 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
     if (pan.current) {
       pan.current = null
       setPanning(false)
+      return
+    }
+    if (cropDrag.current) {
+      cropDrag.current = null
+      if (crop && (crop.w < MIN_CROP || crop.h < MIN_CROP)) setCrop(null)
       return
     }
     if (!drawing.current) return
@@ -497,14 +665,20 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
         zoomTo(1)
       } else if (mod || e.altKey) {
         return
-      } else if (k === 'b') setTool('brush')
-      else if (k === 'e') setTool('eraser')
-      else if (k === 'w') setTool('wand')
-      else if (k === 'h') setTool('hand')
+      } else if (k === 'b') pickTool('brush')
+      else if (k === 'e') pickTool('eraser')
+      else if (k === 'w') pickTool('wand')
+      else if (k === 'r') pickTool('crop')
+      else if (k === 'h') pickTool('hand')
       else if (k === '[') setBrush((b) => Math.max(2, b - 4))
       else if (k === ']') setBrush((b) => Math.min(160, b + 4))
-      else if (k === 'enter') apply()
-      else if (k === 'escape' || k === 'delete') clearMask()
+      else if (k === 'enter') {
+        if (tool === 'crop') applyCrop()
+        else apply()
+      } else if (k === 'escape' || k === 'delete') {
+        if (crop) setCrop(null)
+        else clearMask()
+      }
       else if (k === 'c' && !e.repeat) setComparing(true)
     }
     wheel.current = (e: WheelEvent) => {
@@ -542,6 +716,57 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
   return createPortal(
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-[#1e1e1e] text-[13px] text-[#d6d6d6]" data-testid="base-editor">
       {confirmDialog}
+      <Dialog
+        open={!!importing}
+        onClose={() => {
+          importing?.bitmap.close()
+          setImporting(null)
+        }}
+        title="Tamanho diferente da base"
+        footer={
+          importing &&
+          size && (
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  importing.bitmap.close()
+                  setImporting(null)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  replaceWith(importing.bitmap, importing.name, false)
+                  setImporting(null)
+                }}
+              >
+                Usar {importing.bitmap.width} × {importing.bitmap.height}
+              </Button>
+              <Button
+                variant="primary"
+                autoFocus
+                onClick={() => {
+                  replaceWith(importing.bitmap, importing.name, true)
+                  setImporting(null)
+                }}
+              >
+                Redimensionar para {size.width} × {size.height}
+              </Button>
+            </>
+          )
+        }
+      >
+        {importing && size && (
+          <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+            <p>
+              <b>{importing.name}</b> tem {importing.bitmap.width} × {importing.bitmap.height} px e a base atual tem {size.width} × {size.height} px.
+            </p>
+            <p>Redimensionar estica a imagem para o tamanho da base e mantém as caixas de texto no lugar. Usar o tamanho dela troca o tamanho da página; confira as caixas de texto depois de salvar.</p>
+          </div>
+        )}
+      </Dialog>
 
       <div className="flex h-11 shrink-0 items-center gap-3 border-b border-[#111] bg-[#252525] px-3">
         <span className="grid size-7 place-items-center rounded-md bg-brand text-white">
@@ -590,15 +815,51 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
           </>
         )}
         {tool === 'hand' && <span className="text-[#9a9a9a]">Arraste para mover a imagem. Ctrl+roda do mouse para zoom.</span>}
+        {tool === 'crop' && (
+          <>
+            <span className="whitespace-nowrap tabular-nums text-[#c8c8c8]">
+              {crop ? (
+                <>
+                  <span className="text-[#8a8a8a]">X</span> {crop.x} <span className="ml-2 text-[#8a8a8a]">Y</span> {crop.y} <span className="ml-2 text-[#8a8a8a]">L</span> {crop.w} <span className="ml-2 text-[#8a8a8a]">A</span> {crop.h} px
+                </>
+              ) : (
+                <span className="text-[#9a9a9a]">Arraste sobre a imagem para escolher a área que fica</span>
+              )}
+            </span>
+            {size && (
+              <button type="button" className="whitespace-nowrap rounded border border-[#444] px-2 py-0.5 text-[#d6d6d6] hover:bg-[#3a3a3a]" onClick={() => setCrop({ x: 0, y: 0, w: size.width, h: size.height })} title="Seleciona a imagem inteira para ajustar pelas bordas">
+                Selecionar tudo
+              </button>
+            )}
+            <button type="button" className="whitespace-nowrap rounded bg-brand px-2.5 py-0.5 font-medium text-white hover:brightness-110 disabled:opacity-40" disabled={!crop || crop.w < MIN_CROP || crop.h < MIN_CROP} onClick={applyCrop} title="Enter">
+              Aplicar recorte
+            </button>
+            <button type="button" className="whitespace-nowrap rounded px-2 py-0.5 text-[#c8c8c8] hover:bg-[#3a3a3a] disabled:opacity-40" disabled={!crop} onClick={() => setCrop(null)} title="Esc">
+              Cancelar seleção
+            </button>
+          </>
+        )}
         <span className="ml-auto truncate text-[#9a9a9a]">{active.hint}</span>
       </div>
 
       <div className="flex min-h-0 flex-1">
         <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-[#111] bg-[#2b2b2b] py-2" aria-label="Ferramentas">
           {TOOLS.map((t) => (
-            <IconButton key={t.tool} icon={ICONS[t.tool]} label={`${t.label} (${t.key})`} active={tool === t.tool} onClick={() => setTool(t.tool)} />
+            <IconButton key={t.tool} icon={ICONS[t.tool]} label={`${t.label} (${t.key})`} active={tool === t.tool} onClick={() => pickTool(t.tool)} />
           ))}
           <span className="my-1 h-px w-7 bg-[#3f3f3f]" />
+          <IconButton icon={ICONS.upload} label="Importar imagem: envia um arquivo que substitui a base" disabled={!ready || saving} onClick={() => fileRef.current?.click()} />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) void importFile(file)
+            }}
+          />
           <IconButton
             icon={ICONS.compare}
             label="Comparar com a base atual (segure, ou segure C)"
@@ -634,16 +895,19 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
             </div>
           )}
           <div className={cx('flex min-h-full min-w-full w-max items-center justify-center p-10', !ready && 'invisible')}>
-            <div ref={wrapRef} className="relative shrink-0 bg-white shadow-[0_0_0_1px_#000,0_10px_40px_rgba(0,0,0,0.6)]" style={size ? { width: size.width * zoom, height: size.height * zoom } : undefined}>
+            <div ref={wrapRef} className={cx('relative shrink-0 bg-white shadow-[0_0_0_1px_#000,0_10px_40px_rgba(0,0,0,0.6)]', (comparing || crop) && 'overflow-hidden')} style={size ? { width: size.width * zoom, height: size.height * zoom } : undefined}>
               <canvas ref={imageRef} className="absolute inset-0 h-full w-full" style={{ imageRendering: zoom >= 2 ? 'pixelated' : 'auto' }} />
-              {comparing && sourceUrl && <img src={sourceUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full" />}
+              {comparing && sourceUrl && sourceSize && (
+                <img src={sourceUrl} alt="" className="pointer-events-none absolute max-w-none" style={{ left: -origin.x * zoom, top: -origin.y * zoom, width: sourceSize.width * zoom, height: sourceSize.height * zoom }} />
+              )}
               <canvas
                 ref={maskRef}
                 className={cx(
                   'absolute inset-0 h-full w-full touch-none opacity-55',
                   comparing && 'invisible',
-                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' ? 'cursor-crosshair' : 'cursor-none',
+                  handActive ? (panning ? 'cursor-grabbing' : 'cursor-grab') : tool === 'wand' ? 'cursor-crosshair' : tool === 'crop' ? '' : 'cursor-none',
                 )}
+                style={tool === 'crop' && !handActive ? { cursor: cropCursor } : undefined}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
@@ -660,6 +924,26 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
                   className="pointer-events-none absolute left-0 top-0 hidden rounded-full border border-white mix-blend-difference"
                   style={{ width: cursorSize, height: cursorSize, marginLeft: -cursorSize / 2, marginTop: -cursorSize / 2 }}
                 />
+              )}
+              {crop && crop.w > 0 && crop.h > 0 && (
+                <div
+                  className="pointer-events-none absolute border border-white shadow-[0_0_0_100000px_rgba(0,0,0,0.6)]"
+                  style={{ left: crop.x * zoom, top: crop.y * zoom, width: crop.w * zoom, height: crop.h * zoom }}
+                >
+                  <span className="absolute inset-x-0 top-1/3 border-t border-white/30" />
+                  <span className="absolute inset-x-0 top-2/3 border-t border-white/30" />
+                  <span className="absolute inset-y-0 left-1/3 border-l border-white/30" />
+                  <span className="absolute inset-y-0 left-2/3 border-l border-white/30" />
+                  {(['left-0 top-0', 'right-0 top-0', 'left-0 bottom-0', 'right-0 bottom-0'] as const).map((pos) => (
+                    <span key={pos} className={cx('absolute size-2.5 border border-[#222] bg-white', pos, pos.includes('left') ? '-ml-[5px]' : '-mr-[5px]', pos.includes('top') ? '-mt-[5px]' : '-mb-[5px]')} />
+                  ))}
+                  {(['left-1/2 top-0 -ml-[5px] -mt-[5px]', 'left-1/2 bottom-0 -ml-[5px] -mb-[5px]', 'top-1/2 left-0 -mt-[5px] -ml-[5px]', 'top-1/2 right-0 -mt-[5px] -mr-[5px]'] as const).map((pos) => (
+                    <span key={pos} className={cx('absolute size-2.5 border border-[#222] bg-white', pos)} />
+                  ))}
+                  <span className="absolute left-1/2 top-full mt-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-black/80 px-1.5 py-0.5 text-[11px] tabular-nums text-white">
+                    {crop.w} × {crop.h}
+                  </span>
+                </div>
               )}
             </div>
           </div>
@@ -716,7 +1000,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
               {history.done.map((label, i) => (
                 <li key={`d${i}`}>
                   <button type="button" onClick={() => jumpTo(i + 1)} className={cx('flex w-full items-center gap-2 rounded px-2 py-1 text-left', i === history.done.length - 1 ? 'bg-[#3d4b63] text-white' : 'hover:bg-[#363636]')}>
-                    <Svg className="size-4 shrink-0 text-[#a8a8a8]">{label.startsWith('Caneta') ? ICONS.wand : ICONS.brush}</Svg>
+                    <Svg className="size-4 shrink-0 text-[#a8a8a8]">{stepIcon(label)}</Svg>
                     {label}
                   </button>
                 </li>
@@ -724,7 +1008,7 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
               {history.undone.map((label, i) => (
                 <li key={`u${i}`}>
                   <button type="button" onClick={() => jumpTo(history.done.length + i + 1)} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[#777] hover:bg-[#363636]">
-                    <Svg className="size-4 shrink-0">{label.startsWith('Caneta') ? ICONS.wand : ICONS.brush}</Svg>
+                    <Svg className="size-4 shrink-0">{stepIcon(label)}</Svg>
                     {label}
                   </button>
                 </li>
@@ -742,7 +1026,20 @@ export function BaseEditor({ page, onClose, onSaved }: { page: ReviewPage; onClo
               <dd className="text-right tabular-nums">{size ? `${size.width} × ${size.height} px` : '—'}</dd>
               <dt className="text-[#9a9a9a]">Salva como</dt>
               <dd className="text-right">{ext || 'PNG'} · versão nova da base</dd>
+              {(origin.x > 0 || origin.y > 0) && (
+                <>
+                  <dt className="text-[#9a9a9a]">Recorte</dt>
+                  <dd className="text-right tabular-nums">
+                    a partir de X {origin.x} · Y {origin.y}
+                  </dd>
+                </>
+              )}
             </dl>
+            {sourceSize && size && (size.width !== sourceSize.width || size.height !== sourceSize.height) && (
+              <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-300">
+                O tamanho mudou ({sourceSize.width} × {sourceSize.height} → {size.width} × {size.height}).{origin.x || origin.y ? ' As caixas de texto vão ser movidas junto com o recorte.' : ' Confira as caixas de texto depois de salvar.'}
+              </p>
+            )}
           </Panel>
 
           <Panel
