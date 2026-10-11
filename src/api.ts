@@ -76,7 +76,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`/api${path}`, {
       ...init,
-      headers: init?.body ? { 'content-type': 'application/json' } : undefined,
+      headers: init?.headers ?? (init?.body ? { 'content-type': 'application/json' } : undefined),
     })
   } catch {
     throw new ApiError(0, OFFLINE_MESSAGE)
@@ -102,8 +102,24 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+export async function getBlob(path: string): Promise<Blob> {
+  let res: Response
+  try {
+    res = await fetch(`/api${path}`)
+  } catch {
+    throw new ApiError(0, OFFLINE_MESSAGE)
+  }
+  if (!res.ok) {
+    if (res.status === 401) window.dispatchEvent(new Event('mt:unauthorized'))
+    throw new ApiError(res.status, res.status >= 502 && res.status <= 504 ? OFFLINE_MESSAGE : `Erro ${res.status}`)
+  }
+  return res.blob()
+}
+
 export const post = <T>(path: string, body: unknown = {}) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) })
+export const postBlob = <T>(path: string, blob: Blob) =>
+  request<T>(path, { method: 'POST', body: blob, headers: { 'content-type': blob.type } })
 export const put = <T>(path: string, body: unknown = {}) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
 export const patch = <T>(path: string, body: unknown = {}) =>

@@ -12,6 +12,7 @@ import { ago, when } from '../lib/format'
 import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
 import { CHANGE_LABEL, loadFont, reviewApi, type CommentAction, type FontRow, type Rect, type ReviewComment, type ReviewPage as Page, type TextLayer } from '../reviewApi'
+import { BaseEditor } from './review/BaseEditor'
 import { LayerCanvas, TextPanel } from './review/TextEditing'
 import { HANDLES, handleCursor, moveBox, resizeBox, rotationTo, roundBox, type Box, type Handle } from './review/boxGeometry'
 import { useEditLock, useLayerDraft } from './review/useLayerDraft'
@@ -94,6 +95,7 @@ export function ReviewPage({ pageId }: { pageId: string }) {
   const [full, setFull] = usePref(FULL_KEY, false)
   const [panel, setPanel] = usePref(PANEL_KEY, true)
   const [hideText, setHideText] = useState(false)
+  const [baseEditing, setBaseEditing] = useState(false)
   const [contextPx, setContextPx] = useStoredNumber(CONTEXT_KEY, CONTEXT_CHOICES, 250)
   const [seam, setSeam] = usePref(SEAM_KEY, true)
   const draft = useLayerDraft(page, reload, useCallback((message: string) => toast('failed', message), [toast]))
@@ -297,6 +299,21 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                 </Button>
               ))}
             </div>
+            {editing && page.cleanAssetId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="base-editor-open"
+                disabled={!canEditText || busy}
+                title={canEditText ? 'Remove texto ou sujeira da imagem de fundo com pincel ou caneta mágica. Roda no navegador (OpenCV), sem custo de CPU/GPU no servidor' : locked ? 'A página está em outro processo' : (readOnlyReason ?? '')}
+                onClick={async () => {
+                  await draft.flush()
+                  setBaseEditing(true)
+                }}
+              >
+                Edição de base
+              </Button>
+            )}
             {page.cleanAssetId && view.kind === 'current' && (
               <label className="ml-1 flex items-center gap-1.5 text-xs" title="Mostra a página limpa, sem o texto em português, para achar e apagar pedaços de letra que sobraram">
                 <input type="checkbox" className="accent-brand" checked={hideText} onChange={(e) => setHideText(e.target.checked)} /> Ocultar texto
@@ -435,6 +452,18 @@ export function ReviewPage({ pageId }: { pageId: string }) {
         </Card>
         )}
       </div>
+
+      {baseEditing && (
+        <BaseEditor
+          page={page}
+          onClose={() => setBaseEditing(false)}
+          onSaved={(message) => {
+            setBaseEditing(false)
+            toast('done', message)
+            void reload()
+          }}
+        />
+      )}
 
       <AreaDialog
         area={pendingArea}

@@ -1,4 +1,4 @@
-import { del, patch, post, request } from './api'
+import { del, getBlob, patch, post, postBlob, request } from './api'
 import type { WorkflowType } from './workflowsApi'
 
 export interface Rect {
@@ -144,6 +144,8 @@ export const reviewApi = {
   takeEditLock: (pageId: string) => post<{ expiresAt: string }>(`/review/pages/${pageId}/edit-lock`),
   releaseEditLock: (pageId: string) => del<{ ok: true }>(`/review/pages/${pageId}/edit-lock`),
   resetClean: (pageId: string) => post<{ id: number }>(`/review/pages/${pageId}/reset-clean`),
+  baseImage: (pageId: string) => getBlob(`/review/pages/${pageId}/clean`),
+  saveBase: (pageId: string, image: Blob) => postBlob<{ id: number; version: number }>(`/review/pages/${pageId}/clean`, image),
   restore: (pageId: string, versionId: string) => post<{ id: string; number: number }>(`/review/pages/${pageId}/restore`, { versionId }),
   reportReview: (pageId: string) => post<{ ok: true; already?: boolean }>(`/review/pages/${pageId}/report-review`),
   clearReport: (pageId: string) => del<{ ok: true }>(`/review/pages/${pageId}/report-review`),
