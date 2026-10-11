@@ -4,7 +4,7 @@ import { Pagination } from '../components/Pagination'
 import { useConfirm } from '../components/confirm'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Notice, Spinner, Tabs, type Tone } from '../components/ui'
-import { ago, chaptersLabel, duration, num, approxUsd, when } from '../lib/format'
+import { ago, chaptersLabel, num, approxUsd, when } from '../lib/format'
 import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
 import { WF_STATUS } from '../lib/workflowStatus'
@@ -256,8 +256,8 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
                   {w.createdBy}
                   <span className="block" title={`Criado ${when(w.createdAt)}`}>{w.finishedAt ? `terminou ${ago(w.finishedAt)}` : ago(w.createdAt)}</span>
                   {w.finishedAt && (
-                    <span className="block" title={w.startedAt ? `Esperou ${duration(new Date(w.startedAt).getTime() - new Date(w.createdAt).getTime())} na fila antes de começar` : undefined}>
-                      executado em {duration(new Date(w.finishedAt).getTime() - new Date(w.startedAt ?? w.createdAt).getTime())}
+                    <span className="block" title={w.startedAt ? `Esperou ${duration((new Date(w.startedAt).getTime() - new Date(w.createdAt).getTime()) / 1000)} na fila antes de começar` : undefined}>
+                      executado em {duration((new Date(w.finishedAt).getTime() - new Date(w.startedAt ?? w.createdAt).getTime()) / 1000)}
                     </span>
                   )}
                 </span>
