@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useConfirm } from '../components/confirm'
 import { AlertTriangle } from '../components/AlertTriangle'
 import { FileLinks } from '../components/FileLinks'
-import { CheckIcon } from '../components/icons'
-import { assetViewUrl } from '../lib/assets'
+import { AreaIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CursorIcon, DownloadIcon, ExpandIcon, ExternalIcon, EyeOffIcon, LayersIcon, PanelRightIcon, ShrinkIcon, TextBoxIcon, WandIcon } from '../components/icons'
+import { assetDownloadUrl, assetViewUrl } from '../lib/assets'
 import { DISABLED_REASON, useAuth } from '../auth/authCtx'
 import { useJobs } from '../components/jobsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../components/ui'
@@ -77,6 +77,69 @@ function usePref(key: string, fallback: boolean): [boolean, (v: boolean) => void
     [key],
   )
   return [value, set]
+}
+
+function Segmented({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex items-center gap-0.5 rounded-lg bg-slate-200/70 p-0.5 dark:bg-slate-800">
+      {children}
+    </div>
+  )
+}
+
+function SegButton({ active, disabled, onClick, title, children }: { active: boolean; disabled?: boolean; onClick: () => void; title?: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      disabled={disabled}
+      title={title}
+      onClick={onClick}
+      className={cx(
+        'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        active ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/5 dark:bg-slate-950 dark:text-white dark:ring-white/10' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function Chip({ active, onClick, title, children }: { active: boolean; onClick: () => void; title?: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+      className={cx(
+        'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium transition',
+        active ? 'border-brand/40 bg-brand/10 text-brand' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ToolIcon({ as, label, active, onClick, children, ...link }: { as?: 'a'; label: string; active?: boolean; onClick?: () => void; children: ReactNode; href?: string; target?: string; rel?: string; download?: boolean }) {
+  const className = cx(
+    'grid size-8 place-items-center rounded-lg border transition',
+    active ? 'border-brand/40 bg-brand/10 text-brand' : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:bg-slate-950 dark:hover:text-white',
+  )
+  if (as === 'a')
+    return (
+      <a {...link} title={label} aria-label={label} className={className}>
+        {children}
+      </a>
+    )
+  return (
+    <button type="button" title={label} aria-label={label} aria-pressed={active} onClick={onClick} className={className}>
+      {children}
+    </button>
+  )
 }
 
 export function ReviewPage({ pageId }: { pageId: string }) {
@@ -199,15 +262,18 @@ export function ReviewPage({ pageId }: { pageId: string }) {
 
   return (
     <div className={full ? 'fixed inset-0 z-30 flex flex-col gap-2 bg-slate-50 p-2 dark:bg-slate-950' : 'space-y-4'} data-testid="review-root">
-      <div className={cx('flex flex-wrap items-center justify-between', full ? 'gap-2 px-1' : 'gap-3')}>
-        <div className={full ? 'flex items-baseline gap-3' : undefined}>
-          <div className="text-sm text-slate-500">
-            <a href={href('s', page.series.slug)} className="hover:text-brand">{page.series.title}</a> ›{' '}
+      <div className={cx('flex flex-wrap items-end justify-between', full ? 'gap-2 px-1' : 'gap-3')}>
+        <div className={full ? 'flex items-center gap-3' : 'space-y-1'}>
+          <nav className="flex items-center gap-1 text-xs font-medium text-slate-500" aria-label="Caminho">
+            <a href={href('s', page.series.slug)} className="hover:text-brand">{page.series.title}</a>
+            <ChevronRightIcon className="size-3 text-slate-400" />
             <a href={href('s', page.series.slug, page.chapter.id)} className="hover:text-brand">Cap. {page.chapter.number}</a>
-          </div>
-          <h1 className={full ? 'text-base font-semibold' : 'text-xl font-semibold'}>
-            Página {page.position} <span className="text-base font-normal text-slate-500">de {page.total}</span>
+          </nav>
+          <h1 className={cx('flex flex-wrap items-center gap-2 font-semibold tracking-tight', full ? 'text-base' : 'text-2xl')}>
+            Página {page.position}
+            <span className={cx('font-normal text-slate-400', full ? 'text-sm' : 'text-base')}>de {page.total}</span>
             {current && <Badge tone="neutral">v{current.number}</Badge>}
+            {page.editable && page.unpublished && <Badge tone="queued">alterações não publicadas</Badge>}
           </h1>
         </div>
         {page.reported && (
@@ -222,12 +288,29 @@ export function ReviewPage({ pageId }: { pageId: string }) {
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <a href={page.prevId ? href('r', page.prevId) : undefined} aria-disabled={!page.prevId}>
-            <Button size="sm" disabled={!page.prevId} title="Página anterior (←)">← Anterior</Button>
-          </a>
-          <a href={page.nextId ? href('r', page.nextId) : undefined} aria-disabled={!page.nextId}>
-            <Button size="sm" disabled={!page.nextId} title="Próxima página (→)">Próxima →</Button>
-          </a>
+          <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <a
+              href={page.prevId ? href('r', page.prevId) : undefined}
+              aria-disabled={!page.prevId}
+              aria-label="Página anterior"
+              title="Página anterior (←)"
+              className={cx('grid h-8 w-8 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800', !page.prevId && 'pointer-events-none opacity-35')}
+            >
+              <ChevronLeftIcon />
+            </a>
+            <span className="border-x border-slate-200 px-3 text-xs font-medium tabular-nums leading-8 text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              {page.position} / {page.total}
+            </span>
+            <a
+              href={page.nextId ? href('r', page.nextId) : undefined}
+              aria-disabled={!page.nextId}
+              aria-label="Próxima página"
+              title="Próxima página (→)"
+              className={cx('grid h-8 w-8 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800', !page.nextId && 'pointer-events-none opacity-35')}
+            >
+              <ChevronRightIcon />
+            </a>
+          </div>
           {page.approved && !page.unpublished && (
             <button
               type="button"
@@ -275,20 +358,17 @@ export function ReviewPage({ pageId }: { pageId: string }) {
       )}
 
       <div className={full ? cx('grid min-h-0 flex-1 gap-2', panel && 'lg:grid-cols-[minmax(0,1fr)_380px]') : 'grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]'}>
-        <Card className={full ? 'flex min-h-0 flex-col gap-2 p-2' : 'space-y-2 p-2'}>
-          <div className="flex flex-wrap items-center gap-1.5 px-1">
-            <div className="flex gap-1" role="radiogroup" aria-label="Ferramenta">
+        <Card className={full ? 'flex min-h-0 flex-col overflow-hidden p-0' : 'overflow-hidden p-0'}>
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/80 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+            <Segmented label="Ferramenta">
               {([
-                ['view', 'Ver'],
-                ['area', 'Marcar área'],
-                ['text', 'Caixa de texto'],
-              ] as const).map(([m, label]) => (
-                <Button
+                ['view', 'Ver', CursorIcon],
+                ['area', 'Marcar área', AreaIcon],
+                ['text', 'Caixa de texto', TextBoxIcon],
+              ] as const).map(([m, label, Icon]) => (
+                <SegButton
                   key={m}
-                  size="sm"
-                  role="radio"
-                  aria-checked={mode === m}
-                  variant={mode === m ? 'primary' : 'ghost'}
+                  active={mode === m}
                   disabled={m !== 'view' && (locked || view.kind !== 'current' || (m === 'area' ? !can('comment_area') : !can('edit_text') || !page.editable || !!editLock.holder))}
                   onClick={() => {
                     setMode(m)
@@ -296,14 +376,14 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                     if (m === 'area') setTab('comments')
                   }}
                 >
+                  <Icon className="size-3.5" />
                   {label}
-                </Button>
+                </SegButton>
               ))}
-            </div>
+            </Segmented>
             {page.editable && page.cleanAssetId && view.kind === 'current' && (
-              <Button
-                size="sm"
-                variant="ghost"
+              <button
+                type="button"
                 data-testid="base-editor-open"
                 disabled={!canEditBase || busy}
                 title={canEditBase ? 'Remove texto ou sujeira da imagem de fundo com pincel ou caneta mágica. Roda no navegador (OpenCV), sem custo de CPU/GPU no servidor' : locked ? 'A página está em outro processo' : (editLock.holder ?? DISABLED_REASON)}
@@ -312,19 +392,22 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                   await draft.flush()
                   setBaseEditing(true)
                 }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/10 px-3 text-xs font-semibold text-brand transition hover:border-brand/50 hover:bg-brand/15 disabled:cursor-not-allowed disabled:opacity-40"
               >
+                <WandIcon className="size-3.5" />
                 Edição de base
-              </Button>
+              </button>
             )}
+            {(page.cleanAssetId || page.prev || page.next || mode === 'text') && <span className="mx-0.5 h-5 w-px bg-slate-200 dark:bg-slate-700" />}
             {page.cleanAssetId && view.kind === 'current' && (
-              <label className="ml-1 flex items-center gap-1.5 text-xs" title="Mostra a página limpa, sem o texto em português, para achar e apagar pedaços de letra que sobraram">
-                <input type="checkbox" className="accent-brand" checked={hideText} onChange={(e) => setHideText(e.target.checked)} /> Ocultar texto
-              </label>
+              <Chip active={hideText} onClick={() => setHideText(!hideText)} title="Mostra a página limpa, sem o texto em português, para achar e apagar pedaços de letra que sobraram">
+                <EyeOffIcon className="size-3.5" /> Ocultar texto
+              </Chip>
             )}
             {(page.prev || page.next) && (
-              <label className="ml-1 flex items-center gap-1.5 text-xs" title="Mostra o final da página anterior e o começo da próxima, para alinhar textos que passam de uma página para a outra">
-                Vizinhas
-                <select className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-950" value={contextPx} onChange={(e) => setContextPx(Number(e.target.value))}>
+              <label className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white pl-2.5 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300" title="Mostra o final da página anterior e o começo da próxima, para alinhar textos que passam de uma página para a outra">
+                <LayersIcon className="size-3.5" /> Vizinhas
+                <select className="h-full rounded-r-lg border-l border-slate-200 bg-transparent px-1.5 text-xs outline-none dark:border-slate-700" value={contextPx} onChange={(e) => setContextPx(Number(e.target.value))}>
                   <option value={0}>não mostrar</option>
                   <option value={250}>um pouco</option>
                   <option value={500}>mais</option>
@@ -332,42 +415,59 @@ export function ReviewPage({ pageId }: { pageId: string }) {
               </label>
             )}
             {(page.prev || page.next) && contextPx > 0 && (
-              <label className="ml-1 flex items-center gap-1.5 text-xs" title="Mostra a linha tracejada que separa esta página das vizinhas. Desmarque para ver a emenda como no leitor">
-                <input type="checkbox" className="accent-brand" checked={seam} onChange={(e) => setSeam(e.target.checked)} /> Linha
-              </label>
+              <Chip active={seam} onClick={() => setSeam(!seam)} title="Mostra a linha tracejada que separa esta página das vizinhas. Desligue para ver a emenda como no leitor">
+                Linha
+              </Chip>
             )}
             {mode === 'text' && (
-              <label className="ml-1 flex items-center gap-1.5 text-xs">
-                <input type="checkbox" className="accent-brand" checked={square} onChange={(e) => setSquare(e.target.checked)} /> Quadrada
-              </label>
+              <Chip active={square} onClick={() => setSquare(!square)} title="Caixas novas saem quadradas">
+                Quadrada
+              </Chip>
             )}
-            <span className="ml-auto flex gap-1">
-              {(
-                [
-                  ['current', 'Atual'],
-                  ['original', 'Original'],
-                  ...(page.cleanAssetId ? ([['clean', 'Limpa']] as const) : []),
-                  ...(page.cleanFullAssetId ? ([['cleanFull', 'Limpa completa']] as const) : []),
-                  ...(page.markedAssetId ? ([['marked', 'Marcada']] as const) : []),
-                ] as const
-              ).map(([k, label]) => (
-                <Button key={k} size="sm" variant={view.kind === k ? 'secondary' : 'ghost'} onClick={() => setView({ kind: k } as View)}>
-                  {label}
-                </Button>
-              ))}
+            <span className="ml-auto flex flex-wrap items-center gap-1.5">
+              <Segmented label="Imagem exibida">
+                {(
+                  [
+                    ['current', 'Atual'],
+                    ['original', 'Original'],
+                    ...(page.cleanAssetId ? ([['clean', 'Limpa']] as const) : []),
+                    ...(page.cleanFullAssetId ? ([['cleanFull', 'Limpa completa']] as const) : []),
+                    ...(page.markedAssetId ? ([['marked', 'Marcada']] as const) : []),
+                  ] as const
+                ).map(([k, label]) => (
+                  <SegButton key={k} active={view.kind === k} onClick={() => setView({ kind: k } as View)}>
+                    {label}
+                  </SegButton>
+                ))}
+              </Segmented>
               {view.kind === 'version' && <Badge tone="brand">vendo v{view.number}</Badge>}
-              {imageId && <FileLinks assetId={imageId} label="imagem exibida" />}
-              {full && (
-                <Button size="sm" variant="ghost" onClick={() => setPanel(!panel)} title="Mostrar ou esconder comentários, texto e histórico">
-                  {panel ? 'Esconder painel' : 'Mostrar painel'}
-                </Button>
+              {imageId && (
+                <>
+                  <ToolIcon as="a" href={assetViewUrl(imageId)} target="_blank" rel="noreferrer" label="Ver imagem exibida em outra aba">
+                    <ExternalIcon className="size-3.5" />
+                  </ToolIcon>
+                  <ToolIcon as="a" href={assetDownloadUrl(imageId)} download label="Baixar imagem exibida">
+                    <DownloadIcon className="size-3.5" />
+                  </ToolIcon>
+                </>
               )}
-              <Button size="sm" variant={full ? 'secondary' : 'ghost'} onClick={() => setFull(!full)} title={full ? 'Sair da tela cheia (Esc)' : 'Tela cheia: a página inteira cabe na tela (F)'}>
-                {full ? 'Sair da tela cheia' : 'Tela cheia'}
-              </Button>
+              {full && (
+                <ToolIcon label={panel ? 'Esconder painel' : 'Mostrar painel'} active={panel} onClick={() => setPanel(!panel)}>
+                  <PanelRightIcon className="size-3.5" />
+                </ToolIcon>
+              )}
+              <ToolIcon label={full ? 'Sair da tela cheia (Esc)' : 'Tela cheia: a página inteira cabe na tela (F)'} active={full} onClick={() => setFull(!full)}>
+                {full ? <ShrinkIcon className="size-3.5" /> : <ExpandIcon className="size-3.5" />}
+              </ToolIcon>
             </span>
           </div>
-          {mode !== 'view' && <p className="px-1 text-xs text-slate-500">{mode === 'area' ? 'Arraste sobre a imagem para marcar a área.' : `Arraste para criar uma caixa${square ? ' quadrada' : ''}.`}</p>}
+          <div className={full ? 'flex min-h-0 flex-1 flex-col gap-2 bg-slate-100/60 p-2 dark:bg-slate-950/40' : 'space-y-2 bg-slate-100/60 p-3 dark:bg-slate-950/40'}>
+          {mode !== 'view' && (
+            <p className="flex items-center gap-1.5 rounded-md bg-brand/10 px-2.5 py-1.5 text-xs font-medium text-brand">
+              {mode === 'area' ? <AreaIcon className="size-3.5" /> : <TextBoxIcon className="size-3.5" />}
+              {mode === 'area' ? 'Arraste sobre a imagem para marcar a área.' : `Arraste para criar uma caixa${square ? ' quadrada' : ''}.`}
+            </p>
+          )}
           {shownImageId ? (
             <Stage
               fit={full}
@@ -400,6 +500,7 @@ export function ReviewPage({ pageId }: { pageId: string }) {
           ) : (
             <EmptyState>Sem imagem.</EmptyState>
           )}
+          </div>
         </Card>
 
         {(!full || panel) && (
