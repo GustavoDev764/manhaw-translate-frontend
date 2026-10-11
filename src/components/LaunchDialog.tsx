@@ -245,7 +245,7 @@ export function LaunchDialog({
         )}
         {input.type === 'translate' && plan?.provider !== 'gpu' && (
           <Notice tone="neutral">
-            A tradução vai pela fila da Anthropic, que custa metade do preço. Costuma ficar pronta em minutos, mas pode levar até 24 horas. Acompanhe em Workflows › Aguardando tradução.
+            A tradução vai pela fila da Anthropic, que custa metade do preço. Costuma ficar pronta em minutos, mas pode levar até 24 horas. Acompanhe em Workflows › Em andamento.
           </Notice>
         )}
         {plan?.keyMissing && (

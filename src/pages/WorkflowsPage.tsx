@@ -77,7 +77,7 @@ const BATCH_STATUS: Record<AnthropicBatch['status'], string> = {
   ended: 'Finalizado',
 }
 
-type Filter = 'active' | 'anthropic' | 'all' | 'failed' | 'mine'
+type Filter = 'active' | 'failed' | 'done' | 'all'
 
 function lotsText(l: BatchLots, gpu?: boolean) {
   return `${num(l.done)} de ${num(l.total)} lotes prontos${l.queued ? ` · ${num(l.queued)} ${gpu ? 'na GPU' : 'na Anthropic'}` : ''}${l.error ? ` · ${num(l.error)} com erro` : ''}`
@@ -158,7 +158,7 @@ export function ProgressLine({ verb, done, total, prefix }: { verb: string; done
 
 export function WorkflowsPage({ openId }: { openId?: number }) {
   const [filter, setFilter] = useState<Filter>('active')
-  const query = filter === 'active' ? { status: 'active' } : filter === 'anthropic' ? { status: 'anthropic' } : filter === 'failed' ? { status: 'failed' } : filter === 'mine' ? { mine: true } : {}
+  const query = filter === 'all' ? {} : { status: filter }
   const list = usePolling(() => workflowsApi.list({ ...query, take: 50 }), 0, [filter])
   const detail = usePolling(() => (openId ? workflowsApi.get(openId) : Promise.resolve(null)), 0, [openId])
   useWorkflowEvents((e) => {
@@ -177,9 +177,8 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
         onChange={setFilter}
         tabs={[
           { value: 'active', label: 'Em andamento' },
-          { value: 'anthropic', label: 'Aguardando tradução' },
           { value: 'failed', label: 'Com falha' },
-          { value: 'mine', label: 'Meus' },
+          { value: 'done', label: 'Concluído' },
           { value: 'all', label: 'Todos' },
         ]}
       />
@@ -189,7 +188,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
           <Spinner /> Carregando…
         </EmptyState>
       )}
-      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : filter === 'anthropic' ? 'Nada aguardando tradução agora.' : 'Nenhum workflow.'}</EmptyState>}
+      {list.data && !list.data.rows.length && <EmptyState>{filter === 'active' ? 'Nenhum workflow em andamento.' : filter === 'failed' ? 'Nenhum workflow com falha.' : filter === 'done' ? 'Nenhum workflow concluído.' : 'Nenhum workflow.'}</EmptyState>}
       {list.data && list.data.rows.length > 0 && (
         <Card className="divide-y divide-slate-100 dark:divide-slate-800">
           {list.data.rows.map((w) => {
