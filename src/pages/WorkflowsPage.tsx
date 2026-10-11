@@ -167,6 +167,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
   const status = filter === 'all' ? undefined : filter === 'active' ? active : filter
   const list = usePolling(() => workflowsApi.list({ status, skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE }), 0, [status, page])
   const pages = list.data ? Math.max(1, Math.ceil(list.data.total / PAGE_SIZE)) : 1
+  const sc = list.data?.statusCounts
   const detail = usePolling(() => (openId ? workflowsApi.get(openId) : Promise.resolve(null)), 0, [openId])
   useWorkflowEvents((e) => {
     void list.reload()
@@ -212,6 +213,7 @@ export function WorkflowsPage({ openId }: { openId?: number }) {
               }}
             >
               {label}
+              {sc ? ` (${num(value === 'active' ? sc.pending + sc.running : sc[value])})` : ''}
             </Button>
           ))}
         </div>

@@ -389,7 +389,7 @@ export const workflowsApi = {
   releaseChapter: (chapterId: string) => post<{ released: number; locks: number }>(`/workflows/chapters/${chapterId}/release`),
   chapterBusy: (chapterId: string) => request<{ busy: ChapterBusy | null }>(`/workflows/chapters/${chapterId}/busy`),
   list: (q: { status?: string; type?: string; seriesId?: string; mine?: boolean; skip?: number; take?: number } = {}) =>
-    request<{ total: number; rows: WorkflowRow[] }>(`/workflows${qs(q)}`),
+    request<{ total: number; statusCounts?: { pending: number; running: number }; rows: WorkflowRow[] }>(`/workflows${qs(q)}`),
   get: (id: number) => request<WorkflowDetail>(`/workflows/${id}`),
   cancel: (id: number) => post<{ canceled: number }>(`/workflows/${id}/cancel`),
   error: (itemId: string) => request<ItemError>(`/workflows/items/${itemId}/error`),
