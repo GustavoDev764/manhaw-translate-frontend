@@ -40,6 +40,18 @@ export interface ReviewComment {
   resolvedAt: string | null
 }
 
+export interface FontRaiseResult {
+  minSize: number
+  layers: number
+  pages: number
+  chapters: number
+  smallest: number | null
+  skipped: { busy: { number: number; label: string }[]; busyLayers: number; lockedPages: number; editingPages: number }
+  applied: boolean
+  workflow: { id: number; items: number } | null
+  publishError: string | null
+}
+
 export interface TextLayer {
   id: string
   region: Rect & { rotation?: number; erase?: boolean }
@@ -150,6 +162,7 @@ export const reviewApi = {
   restore: (pageId: string, versionId: string) => post<{ id: string; number: number }>(`/review/pages/${pageId}/restore`, { versionId }),
   reportReview: (pageId: string) => post<{ ok: true; already?: boolean }>(`/review/pages/${pageId}/report-review`),
   clearReport: (pageId: string) => del<{ ok: true }>(`/review/pages/${pageId}/report-review`),
+  raiseFontSize: (chapterIds: string[], minSize: number, dryRun: boolean) => post<FontRaiseResult>('/review/font-size/raise', { chapterIds, minSize, dryRun }),
   approve: (pageId: string, approved: boolean) => post<{ ok: true }>(`/review/pages/${pageId}/approve`, { approved }),
   fonts: () => request<FontRow[]>('/fonts'),
   fontRules: () => request<FontRules>('/fonts/rules'),

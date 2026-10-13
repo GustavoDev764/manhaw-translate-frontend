@@ -3,6 +3,7 @@ import { DISABLED_REASON, useAuth } from '../../auth/authCtx'
 import { LaunchDialog } from '../../components/LaunchDialog'
 import { StageActions } from '../../components/StageActions'
 import { useJobs } from '../../components/jobsContext'
+import { reviewApi, type FontRaiseResult } from '../../reviewApi'
 import { UPLOAD_DONE_EVENT, useUploads, type Upload } from '../../components/uploadsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../../components/ui'
 import { GlossaryPanel } from './GlossaryPanel'
@@ -40,6 +41,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const [exporting, setExporting] = useState(false)
   const [packaging, setPackaging] = useState(false)
   const [ranging, setRanging] = useState(false)
+  const [raising, setRaising] = useState(false)
   const [approval, setApproval] = useState<'all' | 'approved' | 'pending'>('all')
   const { uploads, add: addUploads, dismiss } = useUploads()
   const zipInput = useRef<HTMLInputElement>(null)
@@ -179,6 +181,9 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
           <Button size="sm" onClick={() => setPackaging(true)} disabled={!exportable.length} title={exportable.length ? 'Um .zip por capítulo com imagens, escaneamento, tradução e glossário, para importar em outro ambiente' : 'Selecione capítulos com páginas'} data-testid="export-package">
             Exportar pacote{exportable.length ? ` (${exportable.length})` : ''}
           </Button>
+          <Button size="sm" onClick={() => setRaising(true)} disabled={!exportable.length || !can('edit_text')} title={!can('edit_text') ? DISABLED_REASON : exportable.length ? 'Aumenta para um tamanho mínimo só os textos menores que ele e publica as páginas' : 'Selecione capítulos com páginas'} data-testid="raise-font">
+            Fonte mínima{exportable.length ? ` (${exportable.length})` : ''}
+          </Button>
           <DownloadsDrawer seriesId={data.id} />
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(chapters.filter((c) => c.pages > 0).map((c) => c.id)))}>
             Selecionar todos ({chapters.filter((c) => c.pages > 0).length})
@@ -259,6 +264,11 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
       }} />
       <ExportDialog open={exporting} seriesId={data.id} chapters={exportable} onClose={() => setExporting(false)} />
       <PackageDialog open={packaging} seriesId={data.id} chapters={exportable} onClose={() => setPackaging(false)} />
+      <FontRaiseDialog open={raising} chapters={exportable} onClose={() => setRaising(false)} onDone={() => {
+        setRaising(false)
+        setSelected(new Set())
+        void reload()
+      }} />
       <RangeDialog
         open={ranging}
         chapters={chapters}
@@ -454,6 +464,110 @@ function HowToTranslate() {
         <b>Atenção:</b> o <b>Baixar .zip</b> entrega a última versão publicada de cada página. Página que nunca foi publicada sai como o <b>original em inglês</b>. Capítulos importados já vêm escaneados e limpos; os que tinham tradução já vêm publicados.
       </p>
     </details>
+  )
+}
+
+function FontRaiseDialog({ open, chapters, onClose, onDone }: { open: boolean; chapters: LibraryChapter[]; onClose: () => void; onDone: () => void }) {
+  const { toast } = useJobs()
+  const [size, setSize] = useState('30')
+  const [result, setResult] = useState<{ key: string; preview: FontRaiseResult | null; error: string | null } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const value = Math.round(Number(size))
+  const valid = size.trim() !== '' && value >= 6 && value <= 300
+  const ids = chapters.map((c) => c.id).join(',')
+  const key = `${ids}|${value}`
+  const preview = result?.key === key ? result.preview : null
+  const error = result?.key === key ? result.error : null
+
+  useEffect(() => {
+    if (!open || !valid || !ids) return
+    let alive = true
+    const t = setTimeout(() => {
+      reviewApi.raiseFontSize(ids.split(','), value, true).then(
+        (r) => alive && setResult({ key: `${ids}|${value}`, preview: r, error: null }),
+        (err: unknown) => alive && setResult({ key: `${ids}|${value}`, preview: null, error: err instanceof Error ? err.message : String(err) }),
+      )
+    }, 300)
+    return () => {
+      alive = false
+      clearTimeout(t)
+    }
+  }, [open, valid, value, ids])
+
+  const submit = async () => {
+    if (!valid || !preview?.layers) return
+    setSaving(true)
+    try {
+      const r = await reviewApi.raiseFontSize(ids.split(','), value, false)
+      const what = `${r.layers} ${r.layers === 1 ? 'caixa foi' : 'caixas foram'} para ${r.minSize} px em ${r.pages} ${r.pages === 1 ? 'página' : 'páginas'}`
+      if (r.workflow) toast('done', `${what}. Workflow #${r.workflow.id} publicando ${r.workflow.items} ${r.workflow.items === 1 ? 'página' : 'páginas'} na fila leve.`)
+      else toast('failed', `${what}, mas a publicação não começou: ${r.publishError ?? 'motivo desconhecido'}. As alterações ficam salvas para publicar depois.`)
+      onDone()
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const skipped = preview?.skipped
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Tamanho mínimo da fonte"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="primary" disabled={!valid || !preview?.layers || saving} onClick={() => void submit()} data-testid="raise-font-apply">
+            {saving ? 'Aplicando…' : preview?.layers ? `Aumentar ${plural(preview.layers, 'caixa', 'caixas')} e publicar` : 'Aumentar e publicar'}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <Field label="Tamanho mínimo (px)" hint="Só os textos menores que esse valor mudam; os maiores ou iguais ficam como estão.">
+          <input className={inputClass} type="number" min={6} max={300} step={1} value={size} onChange={(e) => setSize(e.target.value)} autoFocus />
+        </Field>
+        <div className="text-sm text-slate-600 dark:text-slate-300" data-testid="raise-font-preview">
+          {!valid ? (
+            'Digite um tamanho de 6 a 300 px.'
+          ) : error ? (
+            <span className="text-failed">{error}</span>
+          ) : !preview ? (
+            <span className="inline-flex items-center gap-2">
+              <Spinner /> Contando as caixas…
+            </span>
+          ) : preview.layers ? (
+            <>
+              {plural(preview.layers, 'caixa de texto', 'caixas de texto')} em {plural(preview.pages, 'página', 'páginas')} de {plural(preview.chapters, 'capítulo', 'capítulos')} {preview.layers === 1 ? 'está' : 'estão'} abaixo de {preview.minSize} px (a menor tem {preview.smallest} px). Elas vão para {preview.minSize} px e as páginas são redesenhadas e publicadas.
+            </>
+          ) : (
+            `Nenhuma caixa de texto abaixo de ${preview.minSize} px nos capítulos escolhidos.`
+          )}
+        </div>
+        {skipped && (skipped.busy.length > 0 || skipped.lockedPages > 0 || skipped.editingPages > 0) && (
+          <Notice tone="queued">
+            Ficam de fora:
+            {skipped.busy.length > 0 && ` ${skipped.busy.map((b) => `Cap. ${b.number} (${b.label})`).join(', ')};`}
+            {skipped.lockedPages > 0 && ` ${plural(skipped.lockedPages, 'página em outro processo', 'páginas em outro processo')};`}
+            {skipped.editingPages > 0 && ` ${plural(skipped.editingPages, 'página sendo editada', 'páginas sendo editadas')} por outra pessoa;`}
+            {' '}rode de novo quando terminarem.
+          </Notice>
+        )}
+        <p className="text-xs text-slate-500">Se o texto maior não couber na caixa, ele passa da altura dela; confira as páginas na revisão.</p>
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
   )
 }
 
