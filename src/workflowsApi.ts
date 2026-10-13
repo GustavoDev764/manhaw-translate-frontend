@@ -1,7 +1,7 @@
 import { del, patch, post, put, request } from './api'
 
 export type LaunchType = 'download' | 'scan' | 'translate' | 'cleanup' | 'render'
-export type WorkflowType = LaunchType | 'import' | 'fix_area' | 'edit_text' | 'delete' | 'export'
+export type WorkflowType = LaunchType | 'import' | 'fix_area' | 'edit_text' | 'delete' | 'export' | 'clean_check'
 export type WorkflowStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'partial' | 'canceled'
 export type ItemStatus = 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'canceled' | 'waiting_key' | 'waiting_api'
 
@@ -16,6 +16,7 @@ export const STAGE_LABEL: Record<WorkflowType, string> = {
   edit_text: 'Editar texto',
   delete: 'Excluir arquivos',
   export: 'Gerar zip',
+  clean_check: 'Remover inglês restante',
 }
 
 export const STAGE_HELP: Record<LaunchType, string> = {
@@ -387,6 +388,8 @@ export const workflowsApi = {
   create: (input: LaunchInput) => post<{ id: number; ids?: number[]; items: number; totals: PlanTotals; excluded?: { number: number; reason: ExcludeReason; busy: ChapterBusy | null }[] }>('/workflows', input),
   publishPages: (pageIds: string[]) =>
     post<{ id: number; items: number; excluded: { busy: { number: number; busy: ChapterBusy }[]; busyPages: number; locked: number; editing: number; unchanged: number } }>('/review/publish', { pageIds }),
+  cleanCheck: (chapterIds: string[], onlyReported: boolean, dryRun: boolean) =>
+    post<{ id: number | null; pages: number; chapters: number; skipped: { busy: { number: number; label: string }[]; lockedPages: number; empty: number } }>('/workflows/clean-check', { chapterIds, onlyReported, dryRun }),
   releaseChapter: (chapterId: string) => post<{ released: number; locks: number }>(`/workflows/chapters/${chapterId}/release`),
   chapterBusy: (chapterId: string) => request<{ busy: ChapterBusy | null }>(`/workflows/chapters/${chapterId}/busy`),
   list: (q: { status?: string; type?: string; seriesId?: string; mine?: boolean; skip?: number; take?: number } = {}) =>

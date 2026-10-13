@@ -14,7 +14,7 @@ import { href, navigate, usePolling } from '../../lib/hooks'
 import { AlertTriangle } from '../../components/AlertTriangle'
 import { CheckIcon, PencilIcon } from '../../components/icons'
 import { DownloadsDrawer, OPEN_DOWNLOADS } from '../../components/DownloadsDrawer'
-import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, type ExportKind, type LaunchInput, type LibraryChapter, type PackageInclude } from '../../workflowsApi'
+import { chapterSpec, exportsApi, libraryApi, STAGE_LABEL, workflowsApi, type ExportKind, type LaunchInput, type LibraryChapter, type PackageInclude } from '../../workflowsApi'
 
 const SITE_DOWNLOAD_ENABLED = false
 
@@ -42,6 +42,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const [packaging, setPackaging] = useState(false)
   const [ranging, setRanging] = useState(false)
   const [raising, setRaising] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [approval, setApproval] = useState<'all' | 'approved' | 'pending'>('all')
   const { uploads, add: addUploads, dismiss } = useUploads()
   const zipInput = useRef<HTMLInputElement>(null)
@@ -228,6 +229,9 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
             <Button size="sm" onClick={() => setRaising(true)} disabled={!exportable.length || !can('edit_text')} title={!can('edit_text') ? DISABLED_REASON : exportable.length ? 'Aumenta para um tamanho mínimo só os textos menores que ele e publica as páginas' : 'Selecione capítulos com páginas'} data-testid="raise-font">
               Fonte mínima
             </Button>
+            <Button size="sm" onClick={() => setChecking(true)} disabled={!exportable.length || !can('cleanup_render')} title={!can('cleanup_render') ? DISABLED_REASON : exportable.length ? 'Procura texto em inglês que sobrou na base limpa, apaga e desenha a tradução de novo por cima' : 'Selecione capítulos com páginas'} data-testid="clean-check">
+              Remover inglês restante
+            </Button>
           </ToolbarGroup>
           <ToolbarGroup label="Baixar">
             <Button size="sm" onClick={() => setExporting(true)} disabled={!exportable.length} title={exportable.length ? 'Baixa os capítulos selecionados num .zip, uma pasta por capítulo' : 'Selecione capítulos com páginas'}>
@@ -291,6 +295,11 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
       }} />
       <ExportDialog open={exporting} seriesId={data.id} chapters={exportable} onClose={() => setExporting(false)} />
       <PackageDialog open={packaging} seriesId={data.id} chapters={exportable} onClose={() => setPackaging(false)} />
+      <CleanCheckDialog open={checking} chapters={exportable} reported={exportable.reduce((n, c) => n + c.reported, 0)} onClose={() => setChecking(false)} onDone={() => {
+        setChecking(false)
+        setSelected(new Set())
+        void reload()
+      }} />
       <FontRaiseDialog open={raising} chapters={exportable} onClose={() => setRaising(false)} onDone={() => {
         setRaising(false)
         setSelected(new Set())
@@ -500,6 +509,96 @@ function ToolbarGroup({ label, children }: { label: string; children: ReactNode 
       <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
       {children}
     </div>
+  )
+}
+
+type CleanCheckPreview = Awaited<ReturnType<typeof workflowsApi.cleanCheck>>
+
+function CleanCheckDialog({ open, chapters, reported, onClose, onDone }: { open: boolean; chapters: LibraryChapter[]; reported: number; onClose: () => void; onDone: () => void }) {
+  const { toast } = useJobs()
+  const [onlyReported, setOnlyReported] = useState(false)
+  const [result, setResult] = useState<{ key: string; preview: CleanCheckPreview | null; error: string | null } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const ids = chapters.map((c) => c.id).join(',')
+  const key = `${ids}|${onlyReported}`
+  const preview = result?.key === key ? result.preview : null
+  const error = result?.key === key ? result.error : null
+
+  useEffect(() => {
+    if (!open || !ids) return
+    let alive = true
+    workflowsApi.cleanCheck(ids.split(','), onlyReported, true).then(
+      (r) => alive && setResult({ key: `${ids}|${onlyReported}`, preview: r, error: null }),
+      (err: unknown) => alive && setResult({ key: `${ids}|${onlyReported}`, preview: null, error: err instanceof Error ? err.message : String(err) }),
+    )
+    return () => {
+      alive = false
+    }
+  }, [open, ids, onlyReported])
+
+  const submit = async () => {
+    if (!preview?.pages) return
+    setSaving(true)
+    try {
+      const r = await workflowsApi.cleanCheck(ids.split(','), onlyReported, false)
+      toast('done', `Workflow #${r.id} criado: verificando ${r.pages} ${r.pages === 1 ? 'página' : 'páginas'} na fila de processamento.`)
+      onDone()
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const skipped = preview?.skipped
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Remover inglês restante"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="primary" disabled={!preview?.pages || saving} onClick={() => void submit()} data-testid="clean-check-apply">
+            {saving ? 'Criando…' : preview?.pages ? `Verificar ${plural(preview.pages, 'página', 'páginas')}` : 'Verificar'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <p className="text-slate-600 dark:text-slate-300">
+          O detector de texto (o mesmo do Escanear, sem custo de API) olha a base limpa de cada página. Texto em inglês que sobrou embaixo de uma caixa de tradução é apagado com o LaMa, e restos claros (texto "fantasma") dentro dos balões são removidos sem mexer no contorno. A tradução é desenhada de novo por cima e a página é publicada. Inglês num balão sem tradução não é apagado: vira um comentário na página para você decidir.
+        </p>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" className="accent-brand" checked={onlyReported} onChange={(e) => setOnlyReported(e.target.checked)} disabled={!reported && !onlyReported} />
+          Só as páginas marcadas para revisão{reported ? ` (${reported})` : ' (nenhuma nos capítulos escolhidos)'}
+        </label>
+        <div data-testid="clean-check-preview">
+          {error ? (
+            <span className="text-failed">{error}</span>
+          ) : !preview ? (
+            <span className="inline-flex items-center gap-2">
+              <Spinner /> Contando as páginas…
+            </span>
+          ) : preview.pages ? (
+            `${plural(preview.pages, 'página com base limpa', 'páginas com base limpa')} em ${plural(preview.chapters, 'capítulo', 'capítulos')} ${preview.pages === 1 ? 'será verificada' : 'serão verificadas'}.`
+          ) : (
+            onlyReported ? 'Nenhuma página marcada para revisão com base limpa nesses capítulos.' : 'Nenhuma página com base limpa nesses capítulos.'
+          )}
+        </div>
+        {skipped && (skipped.busy.length > 0 || skipped.lockedPages > 0) && (
+          <Notice tone="queued">
+            Ficam de fora:
+            {skipped.busy.length > 0 && ` ${skipped.busy.map((b) => `Cap. ${b.number} (${b.label})`).join(', ')};`}
+            {skipped.lockedPages > 0 && ` ${plural(skipped.lockedPages, 'página em outro processo', 'páginas em outro processo')};`}
+            {' '}rode de novo quando terminarem.
+          </Notice>
+        )}
+      </div>
+    </Dialog>
   )
 }
 
