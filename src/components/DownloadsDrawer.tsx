@@ -111,7 +111,7 @@ export function DownloadsDrawer({ seriesId }: { seriesId: string }) {
             </div>
           )}
           {list.error && <p className="text-sm text-failed">{list.error}</p>}
-          {list.data !== null && !items.length && <EmptyState>Nenhum zip desta obra. Selecione capítulos e use “Baixar .zip”.</EmptyState>}
+          {list.data !== null && !items.length && <EmptyState>Nenhum zip desta obra. Selecione capítulos e use “.zip” em Baixar.</EmptyState>}
           {items.map((e) => (
             <div key={e.id} className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
               <div className="flex items-start justify-between gap-2">

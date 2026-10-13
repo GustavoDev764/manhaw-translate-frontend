@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { DISABLED_REASON, useAuth } from '../../auth/authCtx'
 import { LaunchDialog } from '../../components/LaunchDialog'
 import { StageActions } from '../../components/StageActions'
@@ -167,49 +167,76 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
       ) : (
       <>
       <HowToTranslate />
-      <Card className="sticky top-14 z-10 flex flex-wrap items-center justify-between gap-2 p-3">
-        <StageActions
-          count={chosen.length}
-          unit={chosen.length === 1 ? 'capítulo' : 'capítulos'}
-          canRender={chosen.some((c) => c.translated > 0)}
-          onLaunch={(type) => setLaunch({ type, seriesId: data.id, chapterIds: chosen.map((c) => c.id) })}
-        />
-        <div className="flex gap-2">
-          <Button size="sm" onClick={() => setExporting(true)} disabled={!exportable.length} title={exportable.length ? 'Baixa os capítulos selecionados num .zip, uma pasta por capítulo' : 'Selecione capítulos com páginas'}>
-            Baixar .zip{exportable.length ? ` (${exportable.length})` : ''}
-          </Button>
-          <Button size="sm" onClick={() => setPackaging(true)} disabled={!exportable.length} title={exportable.length ? 'Um .zip por capítulo com imagens, escaneamento, tradução e glossário, para importar em outro ambiente' : 'Selecione capítulos com páginas'} data-testid="export-package">
-            Exportar pacote{exportable.length ? ` (${exportable.length})` : ''}
-          </Button>
-          <Button size="sm" onClick={() => setRaising(true)} disabled={!exportable.length || !can('edit_text')} title={!can('edit_text') ? DISABLED_REASON : exportable.length ? 'Aumenta para um tamanho mínimo só os textos menores que ele e publica as páginas' : 'Selecione capítulos com páginas'} data-testid="raise-font">
-            Fonte mínima{exportable.length ? ` (${exportable.length})` : ''}
-          </Button>
-          <DownloadsDrawer seriesId={data.id} />
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(chapters.filter((c) => c.pages > 0).map((c) => c.id)))}>
-            Selecionar todos ({chapters.filter((c) => c.pages > 0).length})
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(free.map((c) => c.id)))}>
-            Selecionar livres ({free.length})
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setRanging(true)} disabled={!free.length} title="Escolhe do capítulo X até o Y de uma vez">
-            Selecionar intervalo
-          </Button>
-          {selected.size > 0 && (
-            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-              Limpar seleção
+      <Card className="sticky top-14 z-10 divide-y divide-slate-100 dark:divide-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+            <span className={`mr-2 text-sm ${chosen.length ? 'font-semibold text-brand' : 'text-slate-500'}`}>
+              {chosen.length ? `${num(chosen.length)} ${chosen.length === 1 ? 'capítulo selecionado' : 'capítulos selecionados'}` : 'Nenhum capítulo selecionado'}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(chapters.filter((c) => c.pages > 0).map((c) => c.id)))}>
+              Todos ({chapters.filter((c) => c.pages > 0).length})
             </Button>
-          )}
-          {(approvedCount > 0 || approval !== 'all') && (
-            <Button size="sm" variant={approval === 'approved' ? 'primary' : 'ghost'} onClick={() => setApproval((v) => (v === 'approved' ? 'all' : 'approved'))} data-testid="filter-approved">
-              <CheckIcon className="mr-1 size-3.5" />
-              {approval === 'approved' ? 'Mostrar todos' : `Só aprovados (${approvedCount})`}
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(free.map((c) => c.id)))} title="Só os capítulos que não estão em outro processo">
+              Livres ({free.length})
             </Button>
-          )}
-          {(pendingCount > 0 || approval !== 'all') && (
-            <Button size="sm" variant={approval === 'pending' ? 'primary' : 'ghost'} onClick={() => setApproval((v) => (v === 'pending' ? 'all' : 'pending'))}>
-              {approval === 'pending' ? 'Mostrar todos' : `Só pendentes de aprovação (${pendingCount})`}
+            <Button size="sm" variant="ghost" onClick={() => setRanging(true)} disabled={!free.length} title="Escolhe do capítulo X até o Y de uma vez">
+              Intervalo…
             </Button>
-          )}
+            {selected.size > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                Limpar
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {(approvedCount > 0 || pendingCount > 0 || approval !== 'all') && (
+              <div className="inline-flex items-center gap-1 rounded-md bg-slate-100 p-0.5 dark:bg-slate-800/60" role="group" aria-label="Filtrar por aprovação">
+                {(
+                  [
+                    ['all', `Todos`],
+                    ['approved', `Aprovados (${approvedCount})`],
+                    ['pending', `Pendentes (${pendingCount})`],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setApproval(v)}
+                    data-testid={v === 'approved' ? 'filter-approved' : undefined}
+                    className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium transition ${approval === v ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-950 dark:text-slate-100' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                  >
+                    {v === 'approved' && <CheckIcon className="mr-1 size-3.5" />}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <DownloadsDrawer seriesId={data.id} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-3 py-2">
+          <ToolbarGroup label="Processar">
+            <StageActions
+              count={chosen.length}
+              unit={chosen.length === 1 ? 'capítulo' : 'capítulos'}
+              showCount={false}
+              canRender={chosen.some((c) => c.translated > 0)}
+              onLaunch={(type) => setLaunch({ type, seriesId: data.id, chapterIds: chosen.map((c) => c.id) })}
+            />
+          </ToolbarGroup>
+          <ToolbarGroup label="Ajustar">
+            <Button size="sm" onClick={() => setRaising(true)} disabled={!exportable.length || !can('edit_text')} title={!can('edit_text') ? DISABLED_REASON : exportable.length ? 'Aumenta para um tamanho mínimo só os textos menores que ele e publica as páginas' : 'Selecione capítulos com páginas'} data-testid="raise-font">
+              Fonte mínima
+            </Button>
+          </ToolbarGroup>
+          <ToolbarGroup label="Baixar">
+            <Button size="sm" onClick={() => setExporting(true)} disabled={!exportable.length} title={exportable.length ? 'Baixa os capítulos selecionados num .zip, uma pasta por capítulo' : 'Selecione capítulos com páginas'}>
+              .zip
+            </Button>
+            <Button size="sm" onClick={() => setPackaging(true)} disabled={!exportable.length} title={exportable.length ? 'Um .zip por capítulo com imagens, escaneamento, tradução e glossário, para importar em outro ambiente' : 'Selecione capítulos com páginas'} data-testid="export-package">
+              Pacote
+            </Button>
+          </ToolbarGroup>
         </div>
       </Card>
 
@@ -464,6 +491,15 @@ function HowToTranslate() {
         <b>Atenção:</b> o <b>Baixar .zip</b> entrega a última versão publicada de cada página. Página que nunca foi publicada sai como o <b>original em inglês</b>. Capítulos importados já vêm escaneados e limpos; os que tinham tradução já vêm publicados.
       </p>
     </details>
+  )
+}
+
+function ToolbarGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+      {children}
+    </div>
   )
 }
 

@@ -15,19 +15,23 @@ export function StageActions({
   canRender,
   onLaunch,
   unit,
+  showCount = true,
 }: {
   count: number
   canRender: boolean
   onLaunch: (type: LaunchType) => void
   unit: string
+  showCount?: boolean
 }) {
   const { can } = useAuth()
   const stages: Exclude<LaunchType, 'download'>[] = canRender ? ['scan', 'translate', 'cleanup', 'render'] : ['scan', 'translate', 'cleanup']
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-sm text-slate-500">
-        {count ? `${count} ${unit}` : `Selecione ${unit}`}
-      </span>
+      {showCount && (
+        <span className="text-sm text-slate-500">
+          {count ? `${count} ${unit}` : `Selecione ${unit}`}
+        </span>
+      )}
       {stages.map((s) => (
         <Button
           key={s}
