@@ -76,6 +76,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const free = chapters.filter((c) => !c.locked && c.pages > 0)
   const chosen = chapters.filter((c) => selected.has(c.id))
   const exportable = chosen.filter((c) => c.pages > 0)
+  const reportedChosen = chosen.reduce((n, c) => n + c.reported, 0)
   const toggle = (id: string) =>
     setSelected((s) => {
       const n = new Set(s)
@@ -229,8 +230,8 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
             <Button size="sm" onClick={() => setRaising(true)} disabled={!exportable.length || !can('edit_text')} title={!can('edit_text') ? DISABLED_REASON : exportable.length ? 'Aumenta para um tamanho mínimo só os textos menores que ele e publica as páginas' : 'Selecione capítulos com páginas'} data-testid="raise-font">
               Fonte mínima
             </Button>
-            <Button size="sm" onClick={() => setChecking(true)} disabled={!exportable.length || !can('cleanup_render')} title={!can('cleanup_render') ? DISABLED_REASON : exportable.length ? 'Procura texto em inglês que sobrou na base limpa, apaga e desenha a tradução de novo por cima' : 'Selecione capítulos com páginas'} data-testid="clean-check">
-              Remover inglês restante
+            <Button size="sm" onClick={() => setChecking(true)} disabled={!reportedChosen || !can('cleanup_render')} title={!can('cleanup_render') ? DISABLED_REASON : reportedChosen ? 'Nas páginas marcadas para revisão: procura inglês que sobrou na base limpa, apaga e desenha a tradução de novo por cima' : 'Selecione capítulos com páginas marcadas para revisão'} data-testid="clean-check">
+              Remover inglês restante{reportedChosen ? ` (${reportedChosen})` : ''}
             </Button>
           </ToolbarGroup>
           <ToolbarGroup label="Baixar">
@@ -295,7 +296,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
       }} />
       <ExportDialog open={exporting} seriesId={data.id} chapters={exportable} onClose={() => setExporting(false)} />
       <PackageDialog open={packaging} seriesId={data.id} chapters={exportable} onClose={() => setPackaging(false)} />
-      <CleanCheckDialog open={checking} chapters={exportable} reported={exportable.reduce((n, c) => n + c.reported, 0)} onClose={() => setChecking(false)} onDone={() => {
+      <CleanCheckDialog open={checking} chapters={chosen.filter((c) => c.reported > 0)} onClose={() => setChecking(false)} onDone={() => {
         setChecking(false)
         setSelected(new Set())
         void reload()
@@ -514,33 +515,32 @@ function ToolbarGroup({ label, children }: { label: string; children: ReactNode 
 
 type CleanCheckPreview = Awaited<ReturnType<typeof workflowsApi.cleanCheck>>
 
-function CleanCheckDialog({ open, chapters, reported, onClose, onDone }: { open: boolean; chapters: LibraryChapter[]; reported: number; onClose: () => void; onDone: () => void }) {
+function CleanCheckDialog({ open, chapters, onClose, onDone }: { open: boolean; chapters: LibraryChapter[]; onClose: () => void; onDone: () => void }) {
   const { toast } = useJobs()
-  const [onlyReported, setOnlyReported] = useState(false)
   const [result, setResult] = useState<{ key: string; preview: CleanCheckPreview | null; error: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const ids = chapters.map((c) => c.id).join(',')
-  const key = `${ids}|${onlyReported}`
+  const key = ids
   const preview = result?.key === key ? result.preview : null
   const error = result?.key === key ? result.error : null
 
   useEffect(() => {
     if (!open || !ids) return
     let alive = true
-    workflowsApi.cleanCheck(ids.split(','), onlyReported, true).then(
-      (r) => alive && setResult({ key: `${ids}|${onlyReported}`, preview: r, error: null }),
-      (err: unknown) => alive && setResult({ key: `${ids}|${onlyReported}`, preview: null, error: err instanceof Error ? err.message : String(err) }),
+    workflowsApi.cleanCheck(ids.split(','), true).then(
+      (r) => alive && setResult({ key: ids, preview: r, error: null }),
+      (err: unknown) => alive && setResult({ key: ids, preview: null, error: err instanceof Error ? err.message : String(err) }),
     )
     return () => {
       alive = false
     }
-  }, [open, ids, onlyReported])
+  }, [open, ids])
 
   const submit = async () => {
     if (!preview?.pages) return
     setSaving(true)
     try {
-      const r = await workflowsApi.cleanCheck(ids.split(','), onlyReported, false)
+      const r = await workflowsApi.cleanCheck(ids.split(','), false)
       toast('done', `Workflow #${r.id} criado: verificando ${r.pages} ${r.pages === 1 ? 'página' : 'páginas'} na fila de processamento.`)
       onDone()
     } catch (err) {
@@ -570,12 +570,8 @@ function CleanCheckDialog({ open, chapters, reported, onClose, onDone }: { open:
     >
       <div className="space-y-3 text-sm">
         <p className="text-slate-600 dark:text-slate-300">
-          O detector de texto (o mesmo do Escanear, sem custo de API) olha a base limpa de cada página. Texto em inglês que sobrou embaixo de uma caixa de tradução é apagado com o LaMa, e restos claros (texto "fantasma") dentro dos balões são removidos sem mexer no contorno. A tradução é desenhada de novo por cima e a página é publicada. Inglês num balão sem tradução não é apagado: vira um comentário na página para você decidir.
+          Só as páginas marcadas para revisão entram. O detector de texto (o mesmo do Escanear, sem custo de API) olha a base limpa de cada uma. Texto em inglês que sobrou embaixo de uma caixa de tradução é apagado com o LaMa, e restos claros (texto "fantasma") dentro dos balões são removidos sem mexer no contorno. A tradução é desenhada de novo por cima e a página é publicada. Inglês num balão sem tradução não é apagado: vira um comentário na página para você decidir.
         </p>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" className="accent-brand" checked={onlyReported} onChange={(e) => setOnlyReported(e.target.checked)} disabled={!reported && !onlyReported} />
-          Só as páginas marcadas para revisão{reported ? ` (${reported})` : ' (nenhuma nos capítulos escolhidos)'}
-        </label>
         <div data-testid="clean-check-preview">
           {error ? (
             <span className="text-failed">{error}</span>
@@ -584,9 +580,9 @@ function CleanCheckDialog({ open, chapters, reported, onClose, onDone }: { open:
               <Spinner /> Contando as páginas…
             </span>
           ) : preview.pages ? (
-            `${plural(preview.pages, 'página com base limpa', 'páginas com base limpa')} em ${plural(preview.chapters, 'capítulo', 'capítulos')} ${preview.pages === 1 ? 'será verificada' : 'serão verificadas'}.`
+            `${plural(preview.pages, 'página marcada para revisão', 'páginas marcadas para revisão')} em ${plural(preview.chapters, 'capítulo', 'capítulos')} ${preview.pages === 1 ? 'será verificada' : 'serão verificadas'}.`
           ) : (
-            onlyReported ? 'Nenhuma página marcada para revisão com base limpa nesses capítulos.' : 'Nenhuma página com base limpa nesses capítulos.'
+            'Nenhuma página marcada para revisão com base limpa nesses capítulos.'
           )}
         </div>
         {skipped && (skipped.busy.length > 0 || skipped.lockedPages > 0) && (

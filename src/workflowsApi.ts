@@ -388,8 +388,8 @@ export const workflowsApi = {
   create: (input: LaunchInput) => post<{ id: number; ids?: number[]; items: number; totals: PlanTotals; excluded?: { number: number; reason: ExcludeReason; busy: ChapterBusy | null }[] }>('/workflows', input),
   publishPages: (pageIds: string[]) =>
     post<{ id: number; items: number; excluded: { busy: { number: number; busy: ChapterBusy }[]; busyPages: number; locked: number; editing: number; unchanged: number } }>('/review/publish', { pageIds }),
-  cleanCheck: (chapterIds: string[], onlyReported: boolean, dryRun: boolean) =>
-    post<{ id: number | null; pages: number; chapters: number; skipped: { busy: { number: number; label: string }[]; lockedPages: number; empty: number } }>('/workflows/clean-check', { chapterIds, onlyReported, dryRun }),
+  cleanCheck: (chapterIds: string[], dryRun: boolean) =>
+    post<{ id: number | null; pages: number; chapters: number; skipped: { busy: { number: number; label: string }[]; lockedPages: number; empty: number } }>('/workflows/clean-check', { chapterIds, dryRun }),
   releaseChapter: (chapterId: string) => post<{ released: number; locks: number }>(`/workflows/chapters/${chapterId}/release`),
   chapterBusy: (chapterId: string) => request<{ busy: ChapterBusy | null }>(`/workflows/chapters/${chapterId}/busy`),
   list: (q: { status?: string; type?: string; seriesId?: string; mine?: boolean; skip?: number; take?: number } = {}) =>
