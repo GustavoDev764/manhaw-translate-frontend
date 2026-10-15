@@ -3,6 +3,7 @@ import { DISABLED_REASON, useAuth } from '../../auth/authCtx'
 import { LaunchDialog } from '../../components/LaunchDialog'
 import { StageActions } from '../../components/StageActions'
 import { useJobs } from '../../components/jobsContext'
+import { useConfirm } from '../../components/confirm'
 import { reviewApi, type FontRaiseResult } from '../../reviewApi'
 import { UPLOAD_DONE_EVENT, useUploads, type Upload } from '../../components/uploadsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../../components/ui'
@@ -44,6 +45,9 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const [raising, setRaising] = useState(false)
   const [checking, setChecking] = useState(false)
   const [approval, setApproval] = useState<'all' | 'approved' | 'pending'>('all')
+  const [publishing, setPublishing] = useState(false)
+  const { toast } = useJobs()
+  const [ask, confirmDialog] = useConfirm()
   const { uploads, add: addUploads, dismiss } = useUploads()
   const zipInput = useRef<HTMLInputElement>(null)
   const seriesId = data?.id
@@ -77,6 +81,9 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
   const chosen = chapters.filter((c) => selected.has(c.id))
   const exportable = chosen.filter((c) => c.pages > 0)
   const reportedChosen = chosen.reduce((n, c) => n + c.reported, 0)
+  const withChanges = chapters.filter((c) => (c.unpublished ?? 0) > 0)
+  const toPublish = (chosen.length ? chosen : withChanges).filter((c) => (c.unpublished ?? 0) > 0 && !c.busy)
+  const pagesToPublish = toPublish.reduce((n, c) => n + (c.unpublished ?? 0), 0)
   const toggle = (id: string) =>
     setSelected((s) => {
       const n = new Set(s)
@@ -84,6 +91,28 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
       else n.add(id)
       return n
     })
+
+  const publish = async () => {
+    if (!toPublish.length) return
+    const ok = await ask({
+      title: 'Publicar alterações',
+      message: `Gera a imagem nova de ${num(pagesToPublish)} ${pagesToPublish === 1 ? 'página' : 'páginas'} em ${num(toPublish.length)} ${toPublish.length === 1 ? 'capítulo' : 'capítulos'} (${toPublish.map((c) => c.number).join(', ')}) com as caixas de texto atuais.`,
+      confirmLabel: 'Publicar',
+    })
+    if (!ok) return
+    setPublishing(true)
+    try {
+      const r = await workflowsApi.publishChapters(toPublish.map((c) => c.id))
+      const out = r.excluded.busyPages + r.excluded.locked + r.excluded.editing
+      toast('done', `Workflow #${r.id} criado: publicando ${r.items} ${r.items === 1 ? 'página' : 'páginas'} na fila leve${out ? ` · ${out} ficaram de fora` : ''}.`)
+      setSelected(new Set())
+      await reload()
+    } catch (err) {
+      toast('failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setPublishing(false)
+    }
+  }
 
   if (error) return <Notice tone="failed">{error}</Notice>
   if (!data)
@@ -184,6 +213,12 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
             <Button size="sm" variant="ghost" onClick={() => setRanging(true)} disabled={!free.length} title="Escolhe do capítulo X até o Y de uma vez">
               Intervalo…
             </Button>
+            {withChanges.length > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(withChanges.filter((c) => !c.busy).map((c) => c.id)))} title="Só os capítulos com alterações nas caixas de texto que ainda não foram publicadas">
+                <PencilIcon className="mr-1 size-3.5" />
+                Não publicados ({withChanges.length})
+              </Button>
+            )}
             {selected.size > 0 && (
               <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
                 Limpar
@@ -227,6 +262,16 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
             />
           </ToolbarGroup>
           <ToolbarGroup label="Ajustar">
+            <Button
+              size="sm"
+              variant={pagesToPublish ? 'primary' : undefined}
+              onClick={() => void publish()}
+              disabled={!pagesToPublish || publishing || !can('edit_text')}
+              title={!can('edit_text') ? DISABLED_REASON : pagesToPublish ? `Gera a imagem nova das páginas com alterações nas caixas de texto${chosen.length ? ' dos capítulos selecionados' : ' de todos os capítulos'}` : chosen.length ? 'Os capítulos selecionados não têm alterações para publicar (ou estão em outro processo)' : 'Nenhum capítulo tem alterações para publicar'}
+              data-testid="publish-chapters"
+            >
+              {publishing ? <Spinner /> : `Publicar alterações${pagesToPublish ? ` (${pagesToPublish})` : ''}`}
+            </Button>
             <Button size="sm" onClick={() => setRaising(true)} disabled={!exportable.length || !can('edit_text')} title={!can('edit_text') ? DISABLED_REASON : exportable.length ? 'Aumenta para um tamanho mínimo só os textos menores que ele e publica as páginas' : 'Selecione capítulos com páginas'} data-testid="raise-font">
               Fonte mínima
             </Button>
@@ -290,6 +335,7 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
           }} />
         </>
       )}
+      {confirmDialog}
       <LaunchDialog input={launch} onClose={() => setLaunch(null)} onCreated={() => {
         setSelected(new Set())
         void reload()

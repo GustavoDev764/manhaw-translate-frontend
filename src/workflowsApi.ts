@@ -107,6 +107,12 @@ export interface ChapterBusy {
   label: string
 }
 
+export interface PublishResult {
+  id: number
+  items: number
+  excluded: { busy: { number: number; busy: ChapterBusy }[]; busyPages: number; locked: number; editing: number; unchanged: number }
+}
+
 export interface PlanChapter {
   chapterId: string | null
   number: number
@@ -386,8 +392,8 @@ export const libraryApi = {
 export const workflowsApi = {
   plan: (input: LaunchInput) => post<Plan>('/workflows/plan', input),
   create: (input: LaunchInput) => post<{ id: number; ids?: number[]; items: number; totals: PlanTotals; excluded?: { number: number; reason: ExcludeReason; busy: ChapterBusy | null }[] }>('/workflows', input),
-  publishPages: (pageIds: string[]) =>
-    post<{ id: number; items: number; excluded: { busy: { number: number; busy: ChapterBusy }[]; busyPages: number; locked: number; editing: number; unchanged: number } }>('/review/publish', { pageIds }),
+  publishPages: (pageIds: string[]) => post<PublishResult>('/review/publish', { pageIds }),
+  publishChapters: (chapterIds: string[]) => post<PublishResult>('/review/publish-chapters', { chapterIds }),
   cleanCheck: (chapterIds: string[], dryRun: boolean) =>
     post<{ id: number | null; pages: number; chapters: number; skipped: { busy: { number: number; label: string }[]; lockedPages: number; empty: number } }>('/workflows/clean-check', { chapterIds, dryRun }),
   releaseChapter: (chapterId: string) => post<{ released: number; locks: number }>(`/workflows/chapters/${chapterId}/release`),
