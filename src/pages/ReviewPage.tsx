@@ -11,7 +11,7 @@ import { cx } from '../lib/cx'
 import { ago, when } from '../lib/format'
 import { href, navigate, usePolling } from '../lib/hooks'
 import { useWorkflowEvents } from '../lib/workflowEvents'
-import { CHANGE_LABEL, loadFont, reviewApi, type CommentAction, type FontRow, type Rect, type ReviewComment, type ReviewPage as Page, type TextLayer } from '../reviewApi'
+import { CHANGE_LABEL, loadFont, queueNeighbors, reviewApi, type CommentAction, type FontRow, type Rect, type ReviewComment, type ReviewPage as Page, type TextLayer } from '../reviewApi'
 import { BaseEditor } from './review/BaseEditor'
 import { LayerCanvas, TextPanel } from './review/TextEditing'
 import { HANDLES, handleCursor, moveBox, resizeBox, rotationTo, roundBox, type Box, type Handle } from './review/boxGeometry'
@@ -142,12 +142,18 @@ function ToolIcon({ as, label, active, onClick, children, ...link }: { as?: 'a';
   )
 }
 
-export function ReviewPage({ pageId }: { pageId: string }) {
+export function ReviewPage({ pageId, queue = false }: { pageId: string; queue?: boolean }) {
   const { can } = useAuth()
   const { toast } = useJobs()
   const [askApproval, approvalDialog] = useConfirm()
   const { data: page, error, reload } = usePolling(() => reviewApi.page(pageId), 0, [pageId])
   const fonts = usePolling(reviewApi.fonts, 0, [])
+  const seriesId = page?.series.id
+  const queueData = usePolling(() => (queue && seriesId ? reviewApi.queue(seriesId) : Promise.resolve(null)), 0, [queue, seriesId])
+  const queueNav = queue && page && queueData.data ? queueNeighbors(queueData.data.pages, page.chapter.number, page.position) : null
+  const pageLink = (id: string) => (queue ? href('r', id, 'fila') : href('r', id))
+  const prevLink = queue ? (queueNav?.prev ? href('r', queueNav.prev.id, 'fila') : null) : page?.prevId ? href('r', page.prevId) : null
+  const nextLink = queue ? (queueNav?.next ? href('r', queueNav.next.id, 'fila') : null) : page?.nextId ? href('r', page.nextId) : null
   const [mode, setMode] = useState<Mode>('view')
   const [tab, setTab] = useState<Tab>('comments')
   const [view, setView] = useState<View>({ kind: 'current' })
@@ -194,12 +200,12 @@ export function ReviewPage({ pageId }: { pageId: string }) {
         draftUndo()
         return
       }
-      if (e.key === 'ArrowLeft' && page.prevId) navigate(href('r', page.prevId))
-      if (e.key === 'ArrowRight' && page.nextId) navigate(href('r', page.nextId))
+      if (e.key === 'ArrowLeft' && prevLink) navigate(prevLink)
+      if (e.key === 'ArrowRight' && nextLink) navigate(nextLink)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [page, tab, draftUndo, full, setFull])
+  }, [page, tab, draftUndo, full, setFull, prevLink, nextLink])
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, ok?: string) => {
@@ -268,6 +274,12 @@ export function ReviewPage({ pageId }: { pageId: string }) {
             <a href={href('s', page.series.slug)} className="hover:text-brand">{page.series.title}</a>
             <ChevronRightIcon className="size-3 text-slate-400" />
             <a href={href('s', page.series.slug, page.chapter.id)} className="hover:text-brand">Cap. {page.chapter.number}</a>
+            {queue && (
+              <>
+                <ChevronRightIcon className="size-3 text-slate-400" />
+                <a href={href('s', page.series.slug, 'revisao')} className="hover:text-brand">Revisão</a>
+              </>
+            )}
           </nav>
           <h1 className={cx('flex flex-wrap items-center gap-2 font-semibold tracking-tight', full ? 'text-base' : 'text-2xl')}>
             Página {page.position}
@@ -282,31 +294,46 @@ export function ReviewPage({ pageId }: { pageId: string }) {
             <span className="flex-1">
               Revisão relatada por <b>{page.reported.by}</b> em {when(page.reported.at)}.
             </span>
-            <Button size="sm" disabled={busy} onClick={() => run(() => reviewApi.clearReport(page.id), 'Marcada como revisada.')}>
-              Marcar como revisada
-            </Button>
+            {queue ? (
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={busy || !queueData.data}
+                data-testid="queue-clear-next"
+                onClick={async () => {
+                  const r = await run(() => reviewApi.clearReport(page.id), queueNav?.next ? 'Marcada como revisada. Abrindo a próxima.' : 'Marcada como revisada. Fim da fila.')
+                  if (r) navigate(nextLink ?? href('s', page.series.slug, 'revisao'))
+                }}
+              >
+                {queueNav?.next ? 'Marcar como revisada e ir para a próxima' : 'Marcar como revisada e terminar'}
+              </Button>
+            ) : (
+              <Button size="sm" disabled={busy} onClick={() => run(() => reviewApi.clearReport(page.id), 'Marcada como revisada.')}>
+                Marcar como revisada
+              </Button>
+            )}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className={cx('inline-flex items-center overflow-hidden rounded-lg border bg-white shadow-sm dark:bg-slate-900', queue ? 'border-amber-300 dark:border-amber-700/60' : 'border-slate-200 dark:border-slate-700')}>
             <a
-              href={page.prevId ? href('r', page.prevId) : undefined}
-              aria-disabled={!page.prevId}
-              aria-label="Página anterior"
-              title="Página anterior (←)"
-              className={cx('grid h-8 w-8 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800', !page.prevId && 'pointer-events-none opacity-35')}
+              href={prevLink ?? undefined}
+              aria-disabled={!prevLink}
+              aria-label={queue ? 'Página marcada anterior' : 'Página anterior'}
+              title={queue ? 'Página marcada anterior (←)' : 'Página anterior (←)'}
+              className={cx('grid h-8 w-8 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800', !prevLink && 'pointer-events-none opacity-35')}
             >
               <ChevronLeftIcon />
             </a>
-            <span className="border-x border-slate-200 px-3 text-xs font-medium tabular-nums leading-8 text-slate-600 dark:border-slate-700 dark:text-slate-300">
-              {page.position} / {page.total}
+            <span className={cx('border-x px-3 text-xs font-medium tabular-nums leading-8', queue ? 'border-amber-300 text-amber-700 dark:border-amber-700/60 dark:text-amber-400' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300')} data-testid={queue ? 'queue-counter' : undefined}>
+              {queue ? (queueData.data ? `Revisão ${page.reported && queueNav ? queueNav.index + 1 : '–'} / ${queueData.data.pages.length}` : 'Revisão') : `${page.position} / ${page.total}`}
             </span>
             <a
-              href={page.nextId ? href('r', page.nextId) : undefined}
-              aria-disabled={!page.nextId}
-              aria-label="Próxima página"
-              title="Próxima página (→)"
-              className={cx('grid h-8 w-8 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800', !page.nextId && 'pointer-events-none opacity-35')}
+              href={nextLink ?? undefined}
+              aria-disabled={!nextLink}
+              aria-label={queue ? 'Próxima página marcada' : 'Próxima página'}
+              title={queue ? 'Próxima página marcada (→)' : 'Próxima página (→)'}
+              className={cx('grid h-8 w-8 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800', !nextLink && 'pointer-events-none opacity-35')}
             >
               <ChevronRightIcon />
             </a>
@@ -476,8 +503,8 @@ export function ReviewPage({ pageId }: { pageId: string }) {
                   ? {
                       px: contextPx,
                       seam,
-                      prev: page.prev ? { src: asset(page.prev.assetId), label: `Página ${page.prev.position}`, link: href('r', page.prev.id) } : null,
-                      next: page.next ? { src: asset(page.next.assetId), label: `Página ${page.next.position}`, link: href('r', page.next.id) } : null,
+                      prev: page.prev ? { src: asset(page.prev.assetId), label: `Página ${page.prev.position}`, link: pageLink(page.prev.id) } : null,
+                      next: page.next ? { src: asset(page.next.assetId), label: `Página ${page.next.position}`, link: pageLink(page.next.id) } : null,
                     }
                   : null
               }

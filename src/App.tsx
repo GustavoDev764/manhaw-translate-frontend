@@ -124,8 +124,9 @@ function Routes() {
   else if (section === 'settings' && slug === 'api-keys' && sub && me?.role === 'system_admin') page = <AdminKeyFormPage keyId={sub} />
   else if (section === 'settings' && slug === 'deletions' && me?.role === 'system_admin') page = <DeletionsPage openId={sub ? Number(sub) : undefined} />
   else if (section === 'settings' && admin) page = ((me?.role !== 'system_admin' && SYSTEM_SETTINGS.includes(slug ?? '') ? null : SETTINGS[slug ?? '']) ?? SETTINGS.users)()
-  else if (section === 'r' && slug) page = <ReviewPage key={slug} pageId={slug} />
+  else if (section === 'r' && slug) page = <ReviewPage key={slug} pageId={slug} queue={sub === 'fila'} />
   else if (section === 's' && slug && sub === 'glossario') page = <SeriesStagesPage key={`${slug}/g`} slug={slug} tab="glossary" />
+  else if (section === 's' && slug && sub === 'revisao') page = <SeriesStagesPage key={`${slug}/r`} slug={slug} tab="review" />
   else if (section === 's' && slug && sub) page = <ChapterStagesPage key={sub} slug={slug} chapterId={sub} />
   else if (section === 's' && slug) page = <SeriesStagesPage key={slug} slug={slug} />
   else if (section === 'workflows') page = <WorkflowsPage openId={slug ? Number(slug) : undefined} />

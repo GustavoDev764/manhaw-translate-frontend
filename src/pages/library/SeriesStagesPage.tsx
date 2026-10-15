@@ -8,6 +8,7 @@ import { reviewApi, type FontRaiseResult } from '../../reviewApi'
 import { UPLOAD_DONE_EVENT, useUploads, type Upload } from '../../components/uploadsContext'
 import { Badge, Button, Card, Dialog, EmptyState, Field, inputClass, Notice, Spinner, Tabs } from '../../components/ui'
 import { GlossaryPanel } from './GlossaryPanel'
+import { ReviewQueuePanel } from './ReviewQueuePanel'
 import { DeleteSeriesDialog, RenameSeriesDialog } from './SeriesManageDialogs'
 import { ago, num } from '../../lib/format'
 import { useWorkflowEvents } from '../../lib/workflowEvents'
@@ -31,7 +32,7 @@ function Progress({ value, total, color }: { value: number; total: number; color
   )
 }
 
-export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab?: 'chapters' | 'glossary' }) {
+export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab?: 'chapters' | 'glossary' | 'review' }) {
   const { can, me } = useAuth()
   const admin = me?.role === 'system_admin' || me?.role === 'scan_admin'
   const [manage, setManage] = useState<'rename' | 'delete' | null>(null)
@@ -183,18 +184,21 @@ export function SeriesStagesPage({ slug, tab = 'chapters' }: { slug: string; tab
         </div>
       </div>
 
-      <Tabs<'chapters' | 'glossary'>
+      <Tabs<'chapters' | 'glossary' | 'review'>
         value={tab}
         onChange={(t) => {
-          navigate(t === 'glossary' ? href('s', slug, 'glossario') : href('s', slug))
+          navigate(t === 'glossary' ? href('s', slug, 'glossario') : t === 'review' ? href('s', slug, 'revisao') : href('s', slug))
         }}
         tabs={[
           { value: 'chapters', label: 'Capítulos' },
+          { value: 'review', label: `Revisão (${num(allChapters.reduce((n, c) => n + c.reported, 0))})` },
           { value: 'glossary', label: 'Glossário' },
         ]}
       />
       {tab === 'glossary' ? (
         <GlossaryPanel seriesId={data.id} />
+      ) : tab === 'review' ? (
+        <ReviewQueuePanel seriesId={data.id} />
       ) : (
       <>
       <HowToTranslate />

@@ -102,6 +102,29 @@ export interface ReviewPage {
   layers: TextLayer[]
 }
 
+export interface QueuePage {
+  id: string
+  position: number
+  chapter: { id: string; number: number }
+  assetId: string | null
+  approved: boolean
+  openComments: number
+  lock: { workflowId: number; stage: WorkflowType; label: string } | null
+  reported: { by: string; at: string }
+}
+
+export interface ReviewQueue {
+  series: { id: string; slug: string; title: string }
+  pages: QueuePage[]
+}
+
+export function queueNeighbors(pages: QueuePage[], chapterNumber: number, position: number) {
+  const cmp = (p: QueuePage) => p.chapter.number - chapterNumber || p.position - position
+  const before = pages.filter((p) => cmp(p) < 0)
+  const after = pages.filter((p) => cmp(p) > 0)
+  return { prev: before[before.length - 1] ?? null, next: after[0] ?? null, index: before.length }
+}
+
 export interface FontRules {
   rule: string
   extensions: string[]
@@ -146,6 +169,7 @@ export const CHANGE_LABEL: Record<VersionChange, string> = {
 
 export const reviewApi = {
   page: (id: string) => request<ReviewPage>(`/review/pages/${id}`),
+  queue: (seriesId: string) => request<ReviewQueue>(`/review/series/${seriesId}/queue`),
   comment: (pageId: string, input: { region: Rect; comment: string; action: CommentAction }) => post<{ id: string; workflowId?: number }>(`/review/pages/${pageId}/comments`, input),
   setComment: (id: string, status: 'open' | 'resolved' | 'discarded') => patch<{ ok: true }>(`/review/comments/${id}`, { status }),
   removeComment: (id: string) => del<{ ok: true }>(`/review/comments/${id}`),
