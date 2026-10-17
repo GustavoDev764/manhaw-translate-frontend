@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { AlertTriangle } from '../../components/AlertTriangle'
+import { Spinner } from '../../components/ui'
 import { assetViewUrl } from '../../lib/assets'
 import { href, usePolling } from '../../lib/hooks'
 import { reviewApi } from '../../reviewApi'
@@ -77,6 +78,7 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   const [error, setError] = useState<string | null>(null)
   const [loadingNext, setLoadingNext] = useState(false)
   const [reportedNow, setReportedNow] = useState<Record<string, boolean>>({})
+  const [reporting, setReporting] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scroller = useRef<HTMLDivElement>(null)
@@ -297,8 +299,9 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
   })
 
   const toggleReport = async () => {
-    if (!currentPage || !currentChapter) return
+    if (!currentPage || !currentChapter || reporting) return
     const n = (current?.page ?? 0) + 1
+    setReporting(true)
     try {
       if (isReported) {
         await reviewApi.clearReport(currentPage.id)
@@ -311,6 +314,8 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
       }
     } catch (err) {
       say(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReporting(false)
     }
   }
 
@@ -410,10 +415,14 @@ export function MangaReaderPage({ slug, chapterId }: { slug: string; chapterId?:
               <Icon d={playing ? ICON.pause : ICON.play} />
             </span>
           </BarButton>
-          <BarButton title={isReported ? 'Revisão já relatada nesta página (clique para retirar)' : 'Relatar revisão nesta página'} onClick={() => void toggleReport()} disabled={!currentPage}>
-            <span className={isReported ? 'text-amber-400' : ''}>
-              <AlertTriangle className="size-5" filled={isReported} />
-            </span>
+          <BarButton title={reporting ? 'Enviando…' : isReported ? 'Revisão já relatada nesta página (clique para retirar)' : 'Relatar revisão nesta página'} onClick={() => void toggleReport()} disabled={!currentPage || reporting}>
+            {reporting ? (
+              <Spinner className="size-5 text-[var(--reader-accent)]" />
+            ) : (
+              <span className={isReported ? 'text-amber-400' : ''}>
+                <AlertTriangle className="size-5" filled={isReported} />
+              </span>
+            )}
           </BarButton>
           <BarButton title="Próximo capítulo (Shift + →)" onClick={() => goTo(1)} disabled={currentIndex < 0 || currentIndex >= chapters.length - 1}>
             <Icon d={ICON.next} />
